@@ -1,5 +1,5 @@
-const CACHE_NAME = 'hk-stock-store-v2';
-const PRECACHE_URLS = ['./', './index.html', './manifest.json', './icon.png'];
+const CACHE_NAME = 'hk-stock-store-v3';
+const PRECACHE_URLS = ['./', './index.html', './manifest.json', './icon.png', './styles.css', './main.js'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
