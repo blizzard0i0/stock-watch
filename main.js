@@ -37,6 +37,31 @@ const TRADE_END_MIN = 10;   // 16:10
 
 const HOLIDAY_CACHE_KEY = 'hk_holiday_calendar_v1';
 const HOLIDAY_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
+// Update annually with current-year HK holidays for offline fallback.
+const FALLBACK_HK_HOLIDAYS_BY_YEAR = {
+    2026: [
+        '2026-01-01',
+        '2026-02-17',
+        '2026-02-18',
+        '2026-02-19',
+        '2026-04-03',
+        '2026-04-04',
+        '2026-04-05',
+        '2026-04-06',
+        '2026-04-07',
+        '2026-05-01',
+        '2026-05-24',
+        '2026-05-25',
+        '2026-06-19',
+        '2026-07-01',
+        '2026-09-26',
+        '2026-10-01',
+        '2026-10-18',
+        '2026-10-19',
+        '2026-12-25',
+        '2026-12-26'
+    ]
+};
 
 let holidayState = {
     status: 'loading',
@@ -158,6 +183,18 @@ function setHolidayStateFromCache(cache, source) {
     };
 }
 
+function getFallbackHolidayPayload(year) {
+    const fallbackDates = FALLBACK_HK_HOLIDAYS_BY_YEAR[year];
+    if (!fallbackDates || fallbackDates.length === 0) return null;
+    return {
+        updatedAt: Date.now(),
+        data: {
+            [year]: fallbackDates,
+            [year + 1]: []
+        }
+    };
+}
+
 async function loadHolidayCalendar() {
     const now = new Date();
     const year = now.getFullYear();
@@ -191,9 +228,16 @@ async function loadHolidayCalendar() {
     } catch (error) {
         if (cache) {
             setHolidayStateFromCache(cache, 'cache-stale');
-        } else {
-            holidayState = { status: 'unavailable', dates: new Set(), source: 'none' };
+            return;
         }
+
+        const fallback = getFallbackHolidayPayload(year);
+        if (fallback) {
+            setHolidayStateFromCache(fallback, 'fallback');
+            return;
+        }
+
+        holidayState = { status: 'unavailable', dates: new Set(), source: 'none' };
     }
 }
 
