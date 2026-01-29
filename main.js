@@ -667,16 +667,14 @@ async function updateStockTable() {
             cells.quote.replaceChildren(...quoteChildren);
 
             cells.change.className = fontClass;
-            const changeIndicator = createTrendIndicator(dayDirectionFromValues(priceVal, preCloseVal));
             const changeText = document.createTextNode(formatNumber(stock.change, numberFormatters.price));
-            cells.change.replaceChildren(...[changeIndicator, changeText].filter(Boolean));
+            cells.change.replaceChildren(changeText);
 
             cells.pct.className = fontClass;
             const pctText = stock.pctChange === 'N/A'
                 ? 'N/A'
                 : `${formatNumber(stock.pctChange, numberFormatters.percent)}%`;
-            const pctIndicator = createTrendIndicator(dayDirectionFromValues(priceVal, preCloseVal));
-            cells.pct.replaceChildren(...[pctIndicator, document.createTextNode(pctText)].filter(Boolean));
+            cells.pct.replaceChildren(document.createTextNode(pctText));
             cells.preClose.textContent = formatNumber(stock.preClose, numberFormatters.price);
             cells.open.textContent = formatNumber(stock.open, numberFormatters.price);
             cells.high.textContent = formatNumber(stock.high, numberFormatters.price);
