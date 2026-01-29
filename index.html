@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hong Kong Stock Watchlist (Smart Schedule)</title>
+    <title>Hong Kong Stock Watchlist (Index Trend)</title>
     
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#007bff">
@@ -34,11 +34,7 @@
             margin-bottom: 10px;
             font-weight: bold;
         }
-        /* MODIFIED: Removed fixed 'color: blue' so JS can control it */
-        .index { 
-            /* color: blue;  <-- Removed this */
-            font-weight: bold;
-        }
+        .index { font-weight: bold; }
         .timestamp { text-align: right; color: black; }
         
         table {
@@ -79,12 +75,16 @@
         /* --- Row Highlight --- */
         .highlight { background-color: #ffff99 !important; }
 
-        /* --- Logic-Based Colors --- */
+        /* --- Logic-Based Text Colors --- */
         .style-flat, .style-flat a { color: black !important; }
         .style-rise-small, .style-rise-small a { color: #4169E1 !important; }
         .style-rise-big, .style-rise-big a { color: #0000ff !important; }
         .style-fall-small, .style-fall-small a { color: #FF4500 !important; }
         .style-fall-big, .style-fall-big a { color: red !important; }
+
+        /* --- NEW: Tick Background Colors (Very Light) --- */
+        .bg-tick-up { background-color: #e6f7ff !important; }   /* Very Light Blue */
+        .bg-tick-down { background-color: #fff1f0 !important; } /* Very Light Red */
 
         /* --- Link Styling --- */
         .stock-link {
@@ -186,7 +186,7 @@
             <div class="divider"></div>
             <div class="control-group">
                 <label for="refreshInput"><strong>Refresh (sec):</strong></label>
-                <input type="number" id="refreshInput" class="input-interval" value="20" min="3" onkeydown="if(event.key === 'Enter') setRefreshInterval()">
+                <input type="number" id="refreshInput" class="input-interval" value="30" min="3" onkeydown="if(event.key === 'Enter') setRefreshInterval()">
                 <button class="btn btn-set" onclick="setRefreshInterval()">Set</button>
             </div>
             <button class="btn btn-reset" onclick="resetDefaults()">Reset Default List</button>
@@ -201,8 +201,15 @@
 
         let stockCodes = [];
         let stockStates = {}; 
+        
+        // --- NEW: State for Index Arrows ---
+        let indexStates = {
+            hsi: { lastPrice: null, arrow: '' },
+            china_index: { lastPrice: null, arrow: '' }
+        };
+
         let refreshTimer = null;
-        let refreshRateSec = 20;
+        let refreshRateSec = 30; // Default 30s
 
         const TRADE_START_HOUR = 9;
         const TRADE_START_MIN = 0;  // 9:00
@@ -402,8 +409,10 @@
                 const highVal = parseFloat(stock.high);
                 const lowVal = parseFloat(stock.low);
 
+                // --- 1. Row Highlight (Extreme Moves) ---
                 if (!isNaN(pctValue) && (pctValue > 10 || pctValue < -10)) row.classList.add('highlight');
 
+                // --- 2. Color Logic for Columns 1-5 ---
                 let fontClass = '';
                 if (!isNaN(priceVal) && !isNaN(preCloseVal)) {
                     if (priceVal === preCloseVal) { fontClass = 'style-flat'; } 
@@ -414,9 +423,22 @@
                     }
                 }
 
+                // --- 3. Price Change Highlight (Lighter Background) ---
+                let bgTickClass = '';
+                if (stockStates[stock.code] && !isNaN(priceVal)) {
+                    const lastPrice = stockStates[stock.code].lastPrice;
+                    if (priceVal > lastPrice) {
+                        bgTickClass = 'bg-tick-up';
+                    } else if (priceVal < lastPrice) {
+                        bgTickClass = 'bg-tick-down';
+                    }
+                }
+
+                // --- 4. Arrow Logic ---
                 const arrowSymbol = getTickArrow(stock.code, stock.quote, stock.dayDirection);
                 const arrowClass = arrowSymbol === '↑' ? 'arrow-up' : arrowSymbol === '↓' ? 'arrow-down' : 'arrow-none';
 
+                // --- 5. Extra Day High/Low Arrow ---
                 let dayRangeArrow = '';
                 if (!isNaN(priceVal)) {
                     if (!isNaN(highVal) && priceVal >= highVal && priceVal > 0) dayRangeArrow = '<span class="arrow-up">↑</span>'; 
@@ -434,7 +456,7 @@
                     <td class="stock-name ${fontClass}">
                         <a href="${linkUrlTransaction}" target="_blank" class="stock-link">${stock.name}</a>
                     </td>
-                    <td class="rt-quote ${fontClass}">
+                    <td class="rt-quote ${fontClass} ${bgTickClass}">
                         ${dayRangeArrow}
                         <span class="${arrowClass}">${arrowSymbol}</span> 
                         ${stock.quote}
@@ -454,12 +476,11 @@
 
             document.getElementById('current_time').textContent = new Date().toLocaleString();
             
-            // MODIFIED: Pass container IDs to update color logic
             updateIndexDisplay('hsi', hsiData, 'hsi-wrapper');
             updateIndexDisplay('china_index', hsceiData, 'hscei-wrapper');
         }
 
-        // MODIFIED: Function to handle index color dynamically
+        // --- NEW: Dynamic Index Arrow Logic ---
         function updateIndexDisplay(prefix, data, wrapperId) {
             document.getElementById(`${prefix}_value`).textContent = data.value;
             const diff = parseFloat(data.difference);
@@ -468,19 +489,44 @@
             const arrowEl = document.getElementById(`${prefix}_arrow`);
             const wrapperEl = document.getElementById(wrapperId);
 
+            // 1. Color Logic (Daily)
             if (diff > 0) {
-                arrowEl.textContent = '↑';
-                arrowEl.className = 'up'; // Used for arrow specific style if needed
-                if(wrapperEl) wrapperEl.style.color = 'blue'; // Whole line Blue
+                if(wrapperEl) wrapperEl.style.color = 'blue';
             } else if (diff < 0) {
-                arrowEl.textContent = '↓';
-                arrowEl.className = 'down';
-                if(wrapperEl) wrapperEl.style.color = 'red'; // Whole line Red
+                if(wrapperEl) wrapperEl.style.color = 'red';
             } else {
-                arrowEl.textContent = '';
-                arrowEl.className = '';
-                if(wrapperEl) wrapperEl.style.color = 'black'; // No change
+                if(wrapperEl) wrapperEl.style.color = 'black';
             }
+
+            // 2. Arrow Logic (Tick)
+            const currentVal = parseFloat(data.value.replace(/,/g, '')); // Remove commas
+            if (isNaN(currentVal)) return;
+
+            let arrow = '';
+            const stateKey = prefix; // 'hsi' or 'china_index'
+
+            if (indexStates[stateKey]) {
+                const lastPrice = indexStates[stateKey].lastPrice;
+                const lastArrow = indexStates[stateKey].arrow;
+
+                if (lastPrice !== null) {
+                    if (currentVal > lastPrice) arrow = '↑';
+                    else if (currentVal < lastPrice) arrow = '↓';
+                    else arrow = lastArrow; // Keep previous
+                } else {
+                    // First load default (use daily trend)
+                    if (diff > 0) arrow = '↑';
+                    else if (diff < 0) arrow = '↓';
+                }
+                
+                // Update State
+                indexStates[stateKey].lastPrice = currentVal;
+                indexStates[stateKey].arrow = arrow;
+            }
+
+            // Render
+            arrowEl.textContent = arrow;
+            arrowEl.className = arrow === '↑' ? 'up' : arrow === '↓' ? 'down' : '';
         }
 
         // --- Resizing & Persistence ---
