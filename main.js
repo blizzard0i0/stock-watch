@@ -361,7 +361,7 @@ function showInputMessage(target, message, isSuccess = false) {
     }
 }
 
-function addStock() {
+async function addStock() {
     const input = dom.newStockInput;
     let code = input.value.trim();
     if (!code) return;
@@ -379,12 +379,29 @@ function addStock() {
         input.value = '';
         return;
     }
+    if (dom.addStockButton) dom.addStockButton.disabled = true;
+    input.disabled = true;
+    showInputMessage(dom.addStockMessage, 'Validating...');
+    const validation = await fetchStockData(code);
+    if (validation.error) {
+        showInputMessage(
+            dom.addStockMessage,
+            validation.errorMessage === 'Invalid stock code.'
+                ? 'Invalid stock code.'
+                : 'Unable to validate now. Try again.'
+        );
+        if (dom.addStockButton) dom.addStockButton.disabled = false;
+        input.disabled = false;
+        return;
+    }
     stockCodes.push(code);
     sortStocks();
     saveStockList();
     input.value = '';
     showInputMessage(dom.addStockMessage, 'Stock added.', true);
     updateStockTable();
+    if (dom.addStockButton) dom.addStockButton.disabled = false;
+    input.disabled = false;
 }
 
 function removeStock(code) {
@@ -420,10 +437,20 @@ async function fetchWithTimeout(url, timeoutMs = 8000) {
     }
 }
 
+function extractStockName(data) {
+    if (!data || !data.daily) return '';
+    const rawName = data.daily.nameChi || data.daily.nameEng || '';
+    return String(rawName).trim();
+}
+
 async function fetchStockData(code) {
     try {
         const response = await fetchWithTimeout(`https://realtime-money18-cdn.on.cc/securityQuote/genStockDetailHKJSON.php?stockcode=${code}`);
         const data = await response.json();
+        const name = extractStockName(data);
+        if (!name) {
+            throw new Error('Invalid stock code');
+        }
         const prevClose = parseFloat(data.daily.preCPrice);
         const currentPrice = parseFloat(data.real.np);
         let change = 'N/A', pctChange = 'N/A', dayDirection = 'none';
@@ -437,7 +464,7 @@ async function fetchStockData(code) {
 
         return {
             code: code,
-            name: data.daily.nameChi || 'N/A',
+            name: name,
             quote: currentPrice !== 'N/A' ? currentPrice : 'N/A',
             change: change,
             pctChange: pctChange,
@@ -450,9 +477,10 @@ async function fetchStockData(code) {
             error: false
         };
     } catch (error) {
+        const isInvalid = error instanceof Error && error.message === 'Invalid stock code';
         return {
             code,
-            name: 'ERROR',
+            name: isInvalid ? 'INVALID' : 'ERROR',
             quote: 'N/A',
             change: 'N/A',
             pctChange: 'N/A',
@@ -463,7 +491,7 @@ async function fetchStockData(code) {
             turnover: 'N/A',
             dayDirection: 'none',
             error: true,
-            errorMessage: 'Data unavailable. Retrying on next refresh.'
+            errorMessage: isInvalid ? 'Invalid stock code.' : 'Data unavailable. Retrying on next refresh.'
         };
     }
 }
