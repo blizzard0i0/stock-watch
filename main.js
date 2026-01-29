@@ -530,7 +530,7 @@ function createArrowSpan(symbol, label) {
     srText.textContent = label;
 
     wrapper.append(arrowSpan, srText);
-    return { wrapper, arrowSpan };
+    return { wrapper, arrowSpan, srText };
 }
 
 function createTrendIndicator(direction) {
@@ -552,6 +552,17 @@ function getRowForStock(code) {
     if (rowCache.has(code)) return rowCache.get(code);
 
     const row = document.createElement('tr');
+    const noLink = createLink({ href: '#', className: 'stock-link', text: '' });
+    const nameLink = createLink({ href: '#', className: 'stock-link', text: '' });
+    const deleteButton = createButton({
+        className: 'btn-delete',
+        title: 'Remove Stock',
+        text: '✕',
+        onClick: () => removeStock(code)
+    });
+    const dayRangeIndicator = createArrowSpan('', '');
+    const tickIndicator = createArrowSpan('', '');
+    const quoteText = document.createTextNode('');
     const cells = {
         no: createCell('td', 'stock-no'),
         name: createCell('td', 'stock-name'),
@@ -566,6 +577,11 @@ function getRowForStock(code) {
         action: createCell('td', ''),
         spacer: createCell('td', '')
     };
+
+    cells.no.appendChild(noLink);
+    cells.name.appendChild(nameLink);
+    cells.quote.append(dayRangeIndicator.wrapper, tickIndicator.wrapper, quoteText);
+    cells.action.appendChild(deleteButton);
 
     row.append(
         cells.no,
@@ -582,7 +598,16 @@ function getRowForStock(code) {
         cells.spacer
     );
 
-    rowCache.set(code, { row, cells });
+    rowCache.set(code, {
+        row,
+        cells,
+        noLink,
+        nameLink,
+        deleteButton,
+        dayRangeIndicator,
+        tickIndicator,
+        quoteText
+    });
     return rowCache.get(code);
 }
 
@@ -631,7 +656,15 @@ async function updateStockTable() {
 
         stockData.forEach(stock => {
             seenCodes.add(stock.code);
-            const { row, cells } = getRowForStock(stock.code);
+            const {
+                row,
+                cells,
+                noLink,
+                nameLink,
+                dayRangeIndicator,
+                tickIndicator,
+                quoteText
+            } = getRowForStock(stock.code);
             const pctValue = parseFloat(stock.pctChange);
             const priceVal = parseFloat(stock.quote);
             const preCloseVal = parseFloat(stock.preClose);
@@ -681,57 +714,47 @@ async function updateStockTable() {
             const linkUrlTransaction = `http://www.etnet.com.hk/www/tc/stocks/realtime/quote_transaction.php?code=${displayCode}`;
 
             cells.no.className = `stock-no ${fontClass}`.trim();
-            cells.no.replaceChildren(createLink({
-                href: linkUrlQuote,
-                className: 'stock-link',
-                text: displayCode
-            }));
+            noLink.href = linkUrlQuote;
+            noLink.textContent = displayCode;
 
             cells.name.className = `stock-name ${fontClass}`.trim();
-            cells.name.replaceChildren(createLink({
-                href: linkUrlTransaction,
-                className: 'stock-link',
-                text: stock.name
-            }));
+            nameLink.href = linkUrlTransaction;
+            nameLink.textContent = stock.name;
 
             cells.quote.className = `rt-quote ${fontClass} ${bgTickClass}`.trim();
-            const quoteChildren = [];
             if (dayRangeArrow) {
-                const { wrapper, arrowSpan } = createArrowSpan(dayRangeArrow, dayRangeArrow === '↑' ? 'Day high' : 'Day low');
-                arrowSpan.className = dayRangeArrow === '↑' ? 'arrow-up' : 'arrow-down';
-                quoteChildren.push(wrapper);
+                dayRangeIndicator.arrowSpan.textContent = dayRangeArrow;
+                dayRangeIndicator.arrowSpan.className = dayRangeArrow === '↑' ? 'arrow-up' : 'arrow-down';
+                dayRangeIndicator.srText.textContent = dayRangeArrow === '↑' ? 'Day high' : 'Day low';
+                dayRangeIndicator.wrapper.hidden = false;
+            } else {
+                dayRangeIndicator.wrapper.hidden = true;
             }
             if (arrowSymbol) {
-                const { wrapper, arrowSpan } = createArrowSpan(arrowSymbol, arrowSymbol === '↑' ? 'Tick up' : 'Tick down');
-                arrowSpan.className = arrowClass;
-                quoteChildren.push(wrapper);
+                tickIndicator.arrowSpan.textContent = arrowSymbol;
+                tickIndicator.arrowSpan.className = arrowClass;
+                tickIndicator.srText.textContent = arrowSymbol === '↑' ? 'Tick up' : 'Tick down';
+                tickIndicator.wrapper.hidden = false;
+            } else {
+                tickIndicator.wrapper.hidden = true;
             }
             const formattedQuote = formatNumber(stock.quote, numberFormatters.price);
-            quoteChildren.push(document.createTextNode(`${quoteChildren.length ? ' ' : ''}${formattedQuote}`));
-            cells.quote.replaceChildren(...quoteChildren);
+            const hasIndicators = !dayRangeIndicator.wrapper.hidden || !tickIndicator.wrapper.hidden;
+            quoteText.textContent = `${hasIndicators ? ' ' : ''}${formattedQuote}`;
 
             cells.change.className = fontClass;
-            const changeText = document.createTextNode(formatNumber(stock.change, numberFormatters.price));
-            cells.change.replaceChildren(changeText);
+            cells.change.textContent = formatNumber(stock.change, numberFormatters.price);
 
             cells.pct.className = fontClass;
             const pctText = stock.pctChange === 'N/A'
                 ? 'N/A'
                 : `${formatNumber(stock.pctChange, numberFormatters.percent)}%`;
-            cells.pct.replaceChildren(document.createTextNode(pctText));
+            cells.pct.textContent = pctText;
             cells.preClose.textContent = formatNumber(stock.preClose, numberFormatters.price);
             cells.open.textContent = formatNumber(stock.open, numberFormatters.price);
             cells.high.textContent = formatNumber(stock.high, numberFormatters.price);
             cells.low.textContent = formatNumber(stock.low, numberFormatters.price);
             cells.turnover.textContent = formatNumber(stock.turnover, numberFormatters.turnover);
-
-            const deleteButton = createButton({
-                className: 'btn-delete',
-                title: 'Remove Stock',
-                text: '✕',
-                onClick: () => removeStock(stock.code)
-            });
-            cells.action.replaceChildren(deleteButton);
 
             fragment.appendChild(row);
         });
