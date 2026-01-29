@@ -15,8 +15,10 @@
 
 ## 使用方式
 
-1. **直接開啟**
-   - 以瀏覽器開啟 `index.html` 即可使用。
+**Demo**：https://st.b0i0.xyz
+
+1. **下載並解壓**
+   - 下載專案 ZIP 檔，解壓縮後以瀏覽器開啟資料夾內的 `index.html`。
 2. **本機啟動簡易伺服器（建議）**
    - 使用任一靜態伺服器（如 VS Code Live Server、`python -m http.server` 等），再開啟 `http://localhost:PORT`。
 3. **新增股票**
