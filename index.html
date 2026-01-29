@@ -1,12 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#007bff">
-    <link rel="apple-touch-icon" href="icon.png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hong Kong Stock Watchlist (Smart Schedule)</title>
+    
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#007bff">
+    <link rel="apple-touch-icon" href="icon.png">
+
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -32,7 +34,11 @@
             margin-bottom: 10px;
             font-weight: bold;
         }
-        .index { color: blue; }
+        /* MODIFIED: Removed fixed 'color: blue' so JS can control it */
+        .index { 
+            /* color: blue;  <-- Removed this */
+            font-weight: bold;
+        }
         .timestamp { text-align: right; color: black; }
         
         table {
@@ -139,8 +145,8 @@
 <body>
     <div class="container">
         <div class="header">
-            <div class="index">恒指: <span id="hsi_value">-</span> <span id="hsi_change">-</span> <span id="hsi_arrow"></span></div>
-            <div class="index">國指: <span id="china_index_value">-</span> <span id="china_index_change">-</span> <span id="china_index_arrow"></span></div>
+            <div id="hsi-wrapper" class="index" style="padding-left: 20px;">恒指: <span id="hsi_value">-</span> <span id="hsi_change">-</span> <span id="hsi_arrow"></span></div>
+            <div id="hscei-wrapper" class="index">國指: <span id="china_index_value">-</span> <span id="china_index_change">-</span> <span id="china_index_arrow"></span></div>
             <div class="timestamp"><span id="current_time">Loading...</span></div>
         </div>
 
@@ -198,7 +204,6 @@
         let refreshTimer = null;
         let refreshRateSec = 20;
 
-        // --- Core Time Constants ---
         const TRADE_START_HOUR = 9;
         const TRADE_START_MIN = 0;  // 9:00
         const TRADE_END_HOUR = 16;
@@ -233,110 +238,69 @@
             if (isNaN(val) || val < 3) { alert("Please enter a valid interval (minimum 3 seconds)."); input.value = refreshRateSec; return; }
             refreshRateSec = val;
             localStorage.setItem(STORAGE_KEY_INTERVAL, refreshRateSec);
-            // Re-evalute schedule immediately
             scheduleNextRefresh();
         }
 
-        // --- NEW: Time Logic ---
         function isTradingHours() {
             const now = new Date();
-            const dayOfWeek = now.getDay(); // 0=Sun, 6=Sat
+            const dayOfWeek = now.getDay();
             const hour = now.getHours();
             const minute = now.getMinutes();
             const timeVal = hour * 100 + minute;
-            
-            const startVal = TRADE_START_HOUR * 100 + TRADE_START_MIN; // 900
-            const endVal = TRADE_END_HOUR * 100 + TRADE_END_MIN;       // 1610
-
-            // Weekdays only
+            const startVal = TRADE_START_HOUR * 100 + TRADE_START_MIN;
+            const endVal = TRADE_END_HOUR * 100 + TRADE_END_MIN;
             if (dayOfWeek < 1 || dayOfWeek > 5) return false;
-            
-            // Time range check
             return timeVal >= startVal && timeVal <= endVal;
         }
 
         function getNextTradingTime() {
             const now = new Date();
             let target = new Date(now);
-            
-            // Set target time to 9:00 AM of current target day
             target.setHours(TRADE_START_HOUR, TRADE_START_MIN, 0, 0);
-
-            // Logic to find next 9am weekday
-            // 1. If today is Fri/Sat/Sun, move to Monday
-            // 2. If today is Weekday but past 16:10, move to tomorrow
-            // 3. If today is Weekday but before 9:00, keep today (target already set to 9am today)
-
             const dayOfWeek = now.getDay();
             const hour = now.getHours();
             const minute = now.getMinutes();
             const timeVal = hour * 100 + minute;
             const endVal = TRADE_END_HOUR * 100 + TRADE_END_MIN;
 
-            if (dayOfWeek === 6) { // Saturday -> Monday
-                target.setDate(now.getDate() + 2);
-            } else if (dayOfWeek === 0) { // Sunday -> Monday
-                target.setDate(now.getDate() + 1);
-            } else if (dayOfWeek === 5 && timeVal > endVal) { // Friday after close -> Monday
-                target.setDate(now.getDate() + 3);
-            } else if (timeVal > endVal) { // Mon-Thu after close -> Tomorrow
-                target.setDate(now.getDate() + 1);
-            }
-            // Else: it's a weekday morning before 9am, target is already set to 9am today.
-
+            if (dayOfWeek === 6) { target.setDate(now.getDate() + 2); }
+            else if (dayOfWeek === 0) { target.setDate(now.getDate() + 1); }
+            else if (dayOfWeek === 5 && timeVal > endVal) { target.setDate(now.getDate() + 3); }
+            else if (timeVal > endVal) { target.setDate(now.getDate() + 1); }
             return target;
         }
 
         function scheduleNextRefresh() {
-            if (refreshTimer) clearTimeout(refreshTimer); // Clear any existing timeout
-
+            if (refreshTimer) clearTimeout(refreshTimer);
             const statusEl = document.getElementById('status');
             const nextRefreshEl = document.getElementById('nextRefresh');
             
             if (isTradingHours()) {
-                // Case A: Inside Trading Hours -> Regular Interval
                 statusEl.textContent = 'Active (Mon-Fri 9:00-16:10)';
                 statusEl.style.color = '#006600';
-                
-                // Refresh immediately if this was a manual trigger or just started
-                // Then schedule next
                 const nextTime = new Date(new Date().getTime() + (refreshRateSec * 1000));
                 nextRefreshEl.textContent = nextTime.toLocaleTimeString();
-                
                 refreshTimer = setTimeout(() => {
-                    updateStockTable().then(() => {
-                        scheduleNextRefresh(); // Recursive loop
-                    });
+                    updateStockTable().then(() => { scheduleNextRefresh(); });
                 }, refreshRateSec * 1000);
-
             } else {
-                // Case B: Outside Trading Hours -> Schedule for 9am
                 const nextStart = getNextTradingTime();
                 const now = new Date();
                 const delay = nextStart.getTime() - now.getTime();
-
                 statusEl.textContent = 'Market Closed. Scheduled for next open.';
                 statusEl.style.color = '#cc6600';
-                
-                // Format display nicely
                 const dateStr = nextStart.toLocaleDateString() + ' ' + nextStart.toLocaleTimeString();
                 nextRefreshEl.textContent = dateStr;
-
-                // Schedule the wake-up
                 if (delay > 0) {
                     refreshTimer = setTimeout(() => {
-                        updateStockTable().then(() => {
-                            scheduleNextRefresh(); // Once woken up, enter loop
-                        });
+                        updateStockTable().then(() => { scheduleNextRefresh(); });
                     }, delay);
                 } else {
-                    // Fallback if calculation slightly off, check again in 1 sec
                     refreshTimer = setTimeout(scheduleNextRefresh, 1000);
                 }
             }
         }
 
-        // --- Standard Operations ---
         function addStock() {
             const input = document.getElementById('newStockInput');
             let code = input.value.trim();
@@ -489,17 +453,34 @@
             });
 
             document.getElementById('current_time').textContent = new Date().toLocaleString();
-            updateIndexDisplay('hsi', hsiData);
-            updateIndexDisplay('china_index', hsceiData);
+            
+            // MODIFIED: Pass container IDs to update color logic
+            updateIndexDisplay('hsi', hsiData, 'hsi-wrapper');
+            updateIndexDisplay('china_index', hsceiData, 'hscei-wrapper');
         }
 
-        function updateIndexDisplay(prefix, data) {
+        // MODIFIED: Function to handle index color dynamically
+        function updateIndexDisplay(prefix, data, wrapperId) {
             document.getElementById(`${prefix}_value`).textContent = data.value;
             const diff = parseFloat(data.difference);
             document.getElementById(`${prefix}_change`).textContent = (diff > 0 ? '+' : '') + data.difference;
+            
             const arrowEl = document.getElementById(`${prefix}_arrow`);
-            arrowEl.textContent = diff > 0 ? '↑' : diff < 0 ? '↓' : '';
-            arrowEl.className = diff > 0 ? 'up' : diff < 0 ? 'down' : '';
+            const wrapperEl = document.getElementById(wrapperId);
+
+            if (diff > 0) {
+                arrowEl.textContent = '↑';
+                arrowEl.className = 'up'; // Used for arrow specific style if needed
+                if(wrapperEl) wrapperEl.style.color = 'blue'; // Whole line Blue
+            } else if (diff < 0) {
+                arrowEl.textContent = '↓';
+                arrowEl.className = 'down';
+                if(wrapperEl) wrapperEl.style.color = 'red'; // Whole line Red
+            } else {
+                arrowEl.textContent = '';
+                arrowEl.className = '';
+                if(wrapperEl) wrapperEl.style.color = 'black'; // No change
+            }
         }
 
         // --- Resizing & Persistence ---
