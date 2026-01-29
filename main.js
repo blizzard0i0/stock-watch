@@ -20,8 +20,21 @@ let refreshRateSec = 30; // Default 30s
 
 const TRADE_START_HOUR = 9;
 const TRADE_START_MIN = 0;  // 9:00
+const TRADE_MORNING_END_HOUR = 12;
+const TRADE_MORNING_END_MIN = 0; // 12:00
+const TRADE_AFTERNOON_START_HOUR = 13;
+const TRADE_AFTERNOON_START_MIN = 0; // 13:00
 const TRADE_END_HOUR = 16;
 const TRADE_END_MIN = 10;   // 16:10
+
+const HOLIDAY_CACHE_KEY = 'hk_holiday_calendar_v1';
+const HOLIDAY_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
+
+let holidayState = {
+    status: 'loading',
+    dates: new Set(),
+    source: 'none'
+};
 
 const numberFormatters = {
     price: new Intl.NumberFormat('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 3 }),
@@ -61,63 +74,196 @@ function setRefreshInterval() {
     scheduleNextRefresh();
 }
 
-function isTradingHours() {
-    const now = new Date();
-    const dayOfWeek = now.getDay();
-    const hour = now.getHours();
-    const minute = now.getMinutes();
-    const timeVal = hour * 100 + minute;
-    const startVal = TRADE_START_HOUR * 100 + TRADE_START_MIN;
-    const endVal = TRADE_END_HOUR * 100 + TRADE_END_MIN;
-    if (dayOfWeek < 1 || dayOfWeek > 5) return false;
-    return timeVal >= startVal && timeVal <= endVal;
+function getDateKey(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
 }
 
-function getNextTradingTime() {
-    const now = new Date();
-    let target = new Date(now);
-    target.setHours(TRADE_START_HOUR, TRADE_START_MIN, 0, 0);
-    const dayOfWeek = now.getDay();
-    const hour = now.getHours();
-    const minute = now.getMinutes();
-    const timeVal = hour * 100 + minute;
-    const endVal = TRADE_END_HOUR * 100 + TRADE_END_MIN;
+function isWeekday(date) {
+    const dayOfWeek = date.getDay();
+    return dayOfWeek >= 1 && dayOfWeek <= 5;
+}
 
-    if (dayOfWeek === 6) { target.setDate(now.getDate() + 2); }
-    else if (dayOfWeek === 0) { target.setDate(now.getDate() + 1); }
-    else if (dayOfWeek === 5 && timeVal > endVal) { target.setDate(now.getDate() + 3); }
-    else if (timeVal > endVal) { target.setDate(now.getDate() + 1); }
+function isHolidayDate(date) {
+    if (holidayState.status !== 'ready') return false;
+    return holidayState.dates.has(getDateKey(date));
+}
+
+async function fetchHolidayCalendar(year) {
+    const response = await fetchWithTimeout(`https://date.nager.at/api/v3/PublicHolidays/${year}/HK`, 8000);
+    if (!response.ok) throw new Error('Holiday calendar fetch failed');
+    const data = await response.json();
+    return data.map(entry => entry.date);
+}
+
+function loadHolidayCache() {
+    const cached = localStorage.getItem(HOLIDAY_CACHE_KEY);
+    if (!cached) return null;
+    try {
+        const parsed = JSON.parse(cached);
+        if (!parsed || !parsed.data || !parsed.updatedAt) return null;
+        return parsed;
+    } catch (error) {
+        return null;
+    }
+}
+
+function setHolidayStateFromCache(cache, source) {
+    const dates = [];
+    Object.values(cache.data).forEach(list => {
+        if (Array.isArray(list)) dates.push(...list);
+    });
+    holidayState = {
+        status: 'ready',
+        dates: new Set(dates),
+        source: source
+    };
+}
+
+async function loadHolidayCalendar() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const nextYear = year + 1;
+    const cache = loadHolidayCache();
+    const cacheValid = cache
+        && cache.data
+        && cache.data[year]
+        && cache.data[nextYear]
+        && (Date.now() - cache.updatedAt) < HOLIDAY_CACHE_TTL_MS;
+
+    if (cacheValid) {
+        setHolidayStateFromCache(cache, 'cache');
+        return;
+    }
+
+    try {
+        const [currentYearDates, nextYearDates] = await Promise.all([
+            fetchHolidayCalendar(year),
+            fetchHolidayCalendar(nextYear)
+        ]);
+        const payload = {
+            updatedAt: Date.now(),
+            data: {
+                [year]: currentYearDates,
+                [nextYear]: nextYearDates
+            }
+        };
+        localStorage.setItem(HOLIDAY_CACHE_KEY, JSON.stringify(payload));
+        setHolidayStateFromCache(payload, 'live');
+    } catch (error) {
+        if (cache) {
+            setHolidayStateFromCache(cache, 'cache-stale');
+        } else {
+            holidayState = { status: 'unavailable', dates: new Set(), source: 'none' };
+        }
+    }
+}
+
+function getTradingDayStart(date) {
+    const target = new Date(date);
+    target.setHours(TRADE_START_HOUR, TRADE_START_MIN, 0, 0);
     return target;
+}
+
+function getNextTradingDayStart(fromDate) {
+    const target = new Date(fromDate);
+    target.setDate(target.getDate() + 1);
+    target.setHours(TRADE_START_HOUR, TRADE_START_MIN, 0, 0);
+    while (!isWeekday(target) || isHolidayDate(target)) {
+        target.setDate(target.getDate() + 1);
+    }
+    return target;
+}
+
+function getMarketStatus(now = new Date()) {
+    const minutesNow = now.getHours() * 60 + now.getMinutes();
+    const morningStart = TRADE_START_HOUR * 60 + TRADE_START_MIN;
+    const morningEnd = TRADE_MORNING_END_HOUR * 60 + TRADE_MORNING_END_MIN;
+    const afternoonStart = TRADE_AFTERNOON_START_HOUR * 60 + TRADE_AFTERNOON_START_MIN;
+    const afternoonEnd = TRADE_END_HOUR * 60 + TRADE_END_MIN;
+
+    if (!isWeekday(now)) {
+        return { state: 'closed', reason: 'Weekend', nextOpen: getNextTradingDayStart(now) };
+    }
+
+    if (isHolidayDate(now)) {
+        return { state: 'holiday', reason: 'Holiday', nextOpen: getNextTradingDayStart(now) };
+    }
+
+    if (minutesNow >= morningStart && minutesNow < morningEnd) {
+        return { state: 'open', session: 'morning' };
+    }
+
+    if (minutesNow >= afternoonStart && minutesNow <= afternoonEnd) {
+        return { state: 'open', session: 'afternoon' };
+    }
+
+    if (minutesNow >= morningEnd && minutesNow < afternoonStart) {
+        const nextOpen = new Date(now);
+        nextOpen.setHours(TRADE_AFTERNOON_START_HOUR, TRADE_AFTERNOON_START_MIN, 0, 0);
+        return { state: 'lunch', reason: 'Lunch Break', nextOpen };
+    }
+
+    if (minutesNow < morningStart) {
+        return { state: 'closed', reason: 'Before open', nextOpen: getTradingDayStart(now) };
+    }
+
+    return { state: 'closed', reason: 'After hours', nextOpen: getNextTradingDayStart(now) };
+}
+
+function isTradingHours() {
+    const marketStatus = getMarketStatus();
+    return marketStatus.state === 'open';
 }
 
 function scheduleNextRefresh() {
     if (refreshTimer) clearTimeout(refreshTimer);
     const statusEl = dom.status;
     const nextRefreshEl = dom.nextRefresh;
+    const now = new Date();
+    const marketStatus = getMarketStatus(now);
 
-    if (isTradingHours()) {
-        statusEl.textContent = 'Active (Mon-Fri 9:00-16:10)';
-        statusEl.style.color = '#006600';
-        const nextTime = new Date(new Date().getTime() + (refreshRateSec * 1000));
+    if (marketStatus.state === 'open') {
+        if (holidayState.status === 'unavailable') {
+            statusEl.textContent = 'Active (Holiday calendar unavailable)';
+            statusEl.style.color = '#cc6600';
+        } else {
+            statusEl.textContent = 'Active (Mon-Fri 9:00-12:00, 13:00-16:10)';
+            statusEl.style.color = '#006600';
+        }
+        const nextTime = new Date(now.getTime() + (refreshRateSec * 1000));
         nextRefreshEl.textContent = nextTime.toLocaleTimeString();
         refreshTimer = setTimeout(() => {
             updateStockTable().then(() => { scheduleNextRefresh(); });
         }, refreshRateSec * 1000);
-    } else {
-        const nextStart = getNextTradingTime();
-        const now = new Date();
-        const delay = nextStart.getTime() - now.getTime();
-        statusEl.textContent = 'Market Closed. Scheduled for next open.';
+        return;
+    }
+
+    const nextStart = marketStatus.nextOpen || getNextTradingDayStart(now);
+    const delay = nextStart.getTime() - now.getTime();
+
+    if (marketStatus.state === 'lunch') {
+        statusEl.textContent = 'Lunch Break (12:00-13:00)';
         statusEl.style.color = '#cc6600';
-        const dateStr = nextStart.toLocaleDateString() + ' ' + nextStart.toLocaleTimeString();
-        nextRefreshEl.textContent = dateStr;
-        if (delay > 0) {
-            refreshTimer = setTimeout(() => {
-                updateStockTable().then(() => { scheduleNextRefresh(); });
-            }, delay);
-        } else {
-            refreshTimer = setTimeout(scheduleNextRefresh, 1000);
-        }
+    } else if (marketStatus.state === 'holiday') {
+        statusEl.textContent = 'Market Holiday';
+        statusEl.style.color = '#cc6600';
+    } else {
+        statusEl.textContent = `Market Closed (${marketStatus.reason})`;
+        statusEl.style.color = '#cc6600';
+    }
+
+    const dateStr = nextStart.toLocaleDateString() + ' ' + nextStart.toLocaleTimeString();
+    nextRefreshEl.textContent = dateStr;
+
+    if (delay > 0) {
+        refreshTimer = setTimeout(() => {
+            updateStockTable().then(() => { scheduleNextRefresh(); });
+        }, delay);
+    } else {
+        refreshTimer = setTimeout(scheduleNextRefresh, 1000);
     }
 }
 
@@ -578,7 +724,7 @@ function initControls() {
     });
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     dom.refreshInput = document.getElementById('refreshInput');
     dom.newStockInput = document.getElementById('newStockInput');
     dom.tbody = document.getElementById('stockData');
@@ -604,6 +750,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     loadRefreshInterval();
     loadStockList();
+    await loadHolidayCalendar();
     initResizableColumns();
     initControls();
 
