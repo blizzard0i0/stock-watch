@@ -2,12 +2,14 @@ const DEFAULT_CODES = ['00005', '00388', '00700', '01183', '01195', '01458', '02
 const STORAGE_KEY_COLS = 'hk_stock_cols_v6';
 const STORAGE_KEY_LIST = 'hk_stock_list_v1';
 const STORAGE_KEY_INTERVAL = 'hk_stock_interval_v1';
+const STORAGE_KEY_SORT = 'hk_stock_sort_v1';
 
 let stockCodes = [];
 let stockStates = {};
 const dom = {};
 const indexElements = {};
 const rowCache = new Map();
+let isRefreshing = false;
 
 // --- NEW: State for Index Arrows ---
 let indexStates = {
@@ -15,8 +17,14 @@ let indexStates = {
     china_index: { lastPrice: null, arrow: '' }
 };
 
+let indexDataCache = {
+    hsi: { value: 'N/A', difference: 'N/A' },
+    china_index: { value: 'N/A', difference: 'N/A' }
+};
+
 let refreshTimer = null;
 let refreshRateSec = 30; // Default 30s
+let sortDirection = 'asc';
 
 const TRADE_START_HOUR = 9;
 const TRADE_START_MIN = 0;  // 9:00
@@ -43,7 +51,10 @@ const numberFormatters = {
 };
 
 function sortStocks() {
-    stockCodes.sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+    stockCodes.sort((a, b) => {
+        const diff = parseInt(a, 10) - parseInt(b, 10);
+        return sortDirection === 'asc' ? diff : -diff;
+    });
 }
 
 function loadStockList() {
@@ -65,12 +76,37 @@ function loadRefreshInterval() {
     dom.refreshInput.value = refreshRateSec;
 }
 
+function loadSortDirection() {
+    const stored = localStorage.getItem(STORAGE_KEY_SORT);
+    if (stored === 'asc' || stored === 'desc') sortDirection = stored;
+    updateSortButtonLabel();
+}
+
+function setSortDirection(nextDirection) {
+    sortDirection = nextDirection;
+    localStorage.setItem(STORAGE_KEY_SORT, sortDirection);
+    updateSortButtonLabel();
+    sortStocks();
+    updateStockTable();
+}
+
+function updateSortButtonLabel() {
+    if (dom.sortButton) {
+        dom.sortButton.textContent = `Sort: ${sortDirection === 'asc' ? 'Asc' : 'Desc'}`;
+    }
+}
+
 function setRefreshInterval() {
     const input = dom.refreshInput;
     let val = parseInt(input.value, 10);
-    if (isNaN(val) || val < 3) { alert('Please enter a valid interval (minimum 3 seconds).'); input.value = refreshRateSec; return; }
+    if (isNaN(val) || val < 3) {
+        showInputMessage(dom.refreshMessage, 'Enter 3 seconds or more.');
+        input.value = refreshRateSec;
+        return;
+    }
     refreshRateSec = val;
     localStorage.setItem(STORAGE_KEY_INTERVAL, refreshRateSec);
+    showInputMessage(dom.refreshMessage, 'Refresh updated.', true);
     scheduleNextRefresh();
 }
 
@@ -267,16 +303,43 @@ function scheduleNextRefresh() {
     }
 }
 
+function showInputMessage(target, message, isSuccess = false) {
+    if (!target) return;
+    target.textContent = message;
+    target.classList.toggle('success', isSuccess);
+    if (message) {
+        setTimeout(() => {
+            if (target.textContent === message) {
+                target.textContent = '';
+                target.classList.remove('success');
+            }
+        }, 3000);
+    }
+}
+
 function addStock() {
     const input = dom.newStockInput;
     let code = input.value.trim();
     if (!code) return;
+    if (!/^\d+$/.test(code)) {
+        showInputMessage(dom.addStockMessage, 'Use digits only.');
+        return;
+    }
+    if (code.length > 5) {
+        showInputMessage(dom.addStockMessage, 'Max 5 digits.');
+        return;
+    }
     while (code.length < 5) code = '0' + code;
-    if (stockCodes.includes(code)) { alert('Stock already in list!'); input.value = ''; return; }
+    if (stockCodes.includes(code)) {
+        showInputMessage(dom.addStockMessage, 'Stock already added.');
+        input.value = '';
+        return;
+    }
     stockCodes.push(code);
     sortStocks();
     saveStockList();
     input.value = '';
+    showInputMessage(dom.addStockMessage, 'Stock added.', true);
     updateStockTable();
 }
 
@@ -355,7 +418,8 @@ async function fetchStockData(code) {
             low: 'N/A',
             turnover: 'N/A',
             dayDirection: 'none',
-            error: true
+            error: true,
+            errorMessage: 'Data unavailable. Retrying on next refresh.'
         };
     }
 }
@@ -425,6 +489,21 @@ function createArrowSpan(symbol, label) {
     return { wrapper, arrowSpan };
 }
 
+function createTrendIndicator(direction) {
+    if (!direction || direction === 'none') return null;
+    const symbol = direction === 'up' ? '▲' : '▼';
+    const span = document.createElement('span');
+    span.className = `trend-indicator ${direction === 'up' ? 'arrow-up' : 'arrow-down'}`;
+    span.setAttribute('aria-hidden', 'true');
+    span.textContent = symbol;
+    const srText = document.createElement('span');
+    srText.className = 'sr-only';
+    srText.textContent = direction === 'up' ? 'Up' : 'Down';
+    const wrapper = document.createElement('span');
+    wrapper.append(span, srText);
+    return wrapper;
+}
+
 function getRowForStock(code) {
     if (rowCache.has(code)) return rowCache.get(code);
 
@@ -464,134 +543,174 @@ function getRowForStock(code) {
 }
 
 async function updateStockTable() {
-    const tbody = dom.tbody;
-    if (stockCodes.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="12">No stocks in list.</td></tr>';
-        rowCache.clear();
-        return;
-    }
-    if (tbody.children.length === 0) tbody.innerHTML = '<tr><td colspan="12">Loading data...</td></tr>';
+    if (isRefreshing) return;
+    isRefreshing = true;
+    try {
+        const tbody = dom.tbody;
+        if (stockCodes.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="12">No stocks in list.</td></tr>';
+            rowCache.clear();
+            return;
+        }
+        if (tbody.children.length === 0) tbody.innerHTML = '<tr><td colspan="12">Loading data...</td></tr>';
 
-    const stockPromises = stockCodes.map(code => fetchStockData(code));
-    const [stockData, hsiData, hsceiData] = await Promise.all([
-        Promise.all(stockPromises), fetchIndexData('HSI'), fetchIndexData('HSCEI')
-    ]);
+        const stockPromises = stockCodes.map(code => fetchStockData(code));
+        const [stockSettled, hsiSettled, hsceiSettled] = await Promise.allSettled([
+            Promise.all(stockPromises),
+            fetchIndexData('HSI'),
+            fetchIndexData('HSCEI')
+        ]);
 
-    const fragment = document.createDocumentFragment();
-    const seenCodes = new Set();
+        const stockData = stockSettled.status === 'fulfilled'
+            ? stockSettled.value
+            : stockCodes.map(code => ({
+                code,
+                name: 'ERROR',
+                quote: 'N/A',
+                change: 'N/A',
+                pctChange: 'N/A',
+                preClose: 'N/A',
+                open: 'N/A',
+                high: 'N/A',
+                low: 'N/A',
+                turnover: 'N/A',
+                dayDirection: 'none',
+                error: true,
+                errorMessage: 'Data unavailable. Retrying on next refresh.'
+            }));
 
-    stockData.forEach(stock => {
-        seenCodes.add(stock.code);
-        const { row, cells } = getRowForStock(stock.code);
-        const pctValue = parseFloat(stock.pctChange);
-        const priceVal = parseFloat(stock.quote);
-        const preCloseVal = parseFloat(stock.preClose);
-        const highVal = parseFloat(stock.high);
-        const lowVal = parseFloat(stock.low);
+        const hsiData = hsiSettled.status === 'fulfilled' ? hsiSettled.value : indexDataCache.hsi;
+        const hsceiData = hsceiSettled.status === 'fulfilled' ? hsceiSettled.value : indexDataCache.china_index;
 
-        row.className = (!isNaN(pctValue) && (pctValue > 10 || pctValue < -10)) ? 'highlight' : '';
-        if (stock.error) row.classList.add('row-error');
+        const fragment = document.createDocumentFragment();
+        const seenCodes = new Set();
 
-        // --- 2. Color Logic for Columns 1-5 ---
-        let fontClass = '';
-        if (!isNaN(priceVal) && !isNaN(preCloseVal)) {
-            if (priceVal === preCloseVal) { fontClass = 'style-flat'; }
-            else if (priceVal > preCloseVal) {
-                if (pctValue > 5) fontClass = 'style-rise-big'; else fontClass = 'style-rise-small';
-            } else {
-                if (pctValue < -5) fontClass = 'style-fall-big'; else fontClass = 'style-fall-small';
+        stockData.forEach(stock => {
+            seenCodes.add(stock.code);
+            const { row, cells } = getRowForStock(stock.code);
+            const pctValue = parseFloat(stock.pctChange);
+            const priceVal = parseFloat(stock.quote);
+            const preCloseVal = parseFloat(stock.preClose);
+            const highVal = parseFloat(stock.high);
+            const lowVal = parseFloat(stock.low);
+
+            row.className = (!isNaN(pctValue) && (pctValue > 10 || pctValue < -10)) ? 'highlight' : '';
+            row.classList.remove('row-error');
+            if (stock.error) row.classList.add('row-error');
+            row.title = stock.error ? (stock.errorMessage || 'Data unavailable.') : '';
+
+            // --- 2. Color Logic for Columns 1-5 ---
+            let fontClass = '';
+            if (!isNaN(priceVal) && !isNaN(preCloseVal)) {
+                if (priceVal === preCloseVal) { fontClass = 'style-flat'; }
+                else if (priceVal > preCloseVal) {
+                    if (pctValue > 5) fontClass = 'style-rise-big'; else fontClass = 'style-rise-small';
+                } else {
+                    if (pctValue < -5) fontClass = 'style-fall-big'; else fontClass = 'style-fall-small';
+                }
             }
-        }
 
-        // --- 3. Price Change Highlight (Lighter Background) ---
-        let bgTickClass = '';
-        if (stockStates[stock.code] && !isNaN(priceVal)) {
-            const lastPrice = stockStates[stock.code].lastPrice;
-            if (priceVal > lastPrice) {
-                bgTickClass = 'bg-tick-up';
-            } else if (priceVal < lastPrice) {
-                bgTickClass = 'bg-tick-down';
+            // --- 3. Price Change Highlight (Lighter Background) ---
+            let bgTickClass = '';
+            if (stockStates[stock.code] && !isNaN(priceVal)) {
+                const lastPrice = stockStates[stock.code].lastPrice;
+                if (priceVal > lastPrice) {
+                    bgTickClass = 'bg-tick-up';
+                } else if (priceVal < lastPrice) {
+                    bgTickClass = 'bg-tick-down';
+                }
             }
-        }
 
-        // --- 4. Arrow Logic ---
-        const arrowSymbol = getTickArrow(stock.code, stock.quote, stock.dayDirection);
-        const arrowClass = arrowSymbol === '↑' ? 'arrow-up' : arrowSymbol === '↓' ? 'arrow-down' : 'arrow-none';
+            // --- 4. Arrow Logic ---
+            const arrowSymbol = getTickArrow(stock.code, stock.quote, stock.dayDirection);
+            const arrowClass = arrowSymbol === '↑' ? 'arrow-up' : arrowSymbol === '↓' ? 'arrow-down' : 'arrow-none';
 
-        // --- 5. Extra Day High/Low Arrow ---
-        let dayRangeArrow = '';
-        if (!isNaN(priceVal)) {
-            if (!isNaN(highVal) && priceVal >= highVal && priceVal > 0) dayRangeArrow = '↑';
-            else if (!isNaN(lowVal) && priceVal <= lowVal && priceVal > 0) dayRangeArrow = '↓';
-        }
+            // --- 5. Extra Day High/Low Arrow ---
+            let dayRangeArrow = '';
+            if (!isNaN(priceVal)) {
+                if (!isNaN(highVal) && priceVal >= highVal && priceVal > 0) dayRangeArrow = '↑';
+                else if (!isNaN(lowVal) && priceVal <= lowVal && priceVal > 0) dayRangeArrow = '↓';
+            }
 
-        const displayCode = stock.code.replace(/^0+(\d+)/, '$1');
-        const linkUrlQuote = `https://www.aastocks.com/tc/stocks/quote/detail-quote.aspx?symbol=${stock.code}`;
-        const linkUrlTransaction = `http://www.etnet.com.hk/www/tc/stocks/realtime/quote_transaction.php?code=${displayCode}`;
+            const displayCode = stock.code.replace(/^0+(\d+)/, '$1');
+            const linkUrlQuote = `https://www.aastocks.com/tc/stocks/quote/detail-quote.aspx?symbol=${stock.code}`;
+            const linkUrlTransaction = `http://www.etnet.com.hk/www/tc/stocks/realtime/quote_transaction.php?code=${displayCode}`;
 
-        cells.no.className = `stock-no ${fontClass}`.trim();
-        cells.no.replaceChildren(createLink({
-            href: linkUrlQuote,
-            className: 'stock-link',
-            text: displayCode
-        }));
+            cells.no.className = `stock-no ${fontClass}`.trim();
+            cells.no.replaceChildren(createLink({
+                href: linkUrlQuote,
+                className: 'stock-link',
+                text: displayCode
+            }));
 
-        cells.name.className = `stock-name ${fontClass}`.trim();
-        cells.name.replaceChildren(createLink({
-            href: linkUrlTransaction,
-            className: 'stock-link',
-            text: stock.name
-        }));
+            cells.name.className = `stock-name ${fontClass}`.trim();
+            cells.name.replaceChildren(createLink({
+                href: linkUrlTransaction,
+                className: 'stock-link',
+                text: stock.name
+            }));
 
-        cells.quote.className = `rt-quote ${fontClass} ${bgTickClass}`.trim();
-        const quoteChildren = [];
-        if (dayRangeArrow) {
-            const { wrapper, arrowSpan } = createArrowSpan(dayRangeArrow, dayRangeArrow === '↑' ? 'Day high' : 'Day low');
-            arrowSpan.className = dayRangeArrow === '↑' ? 'arrow-up' : 'arrow-down';
-            quoteChildren.push(wrapper);
-        }
-        if (arrowSymbol) {
-            const { wrapper, arrowSpan } = createArrowSpan(arrowSymbol, arrowSymbol === '↑' ? 'Tick up' : 'Tick down');
-            arrowSpan.className = arrowClass;
-            quoteChildren.push(wrapper);
-        }
-        const formattedQuote = formatNumber(stock.quote, numberFormatters.price);
-        quoteChildren.push(document.createTextNode(`${quoteChildren.length ? ' ' : ''}${formattedQuote}`));
-        cells.quote.replaceChildren(...quoteChildren);
+            cells.quote.className = `rt-quote ${fontClass} ${bgTickClass}`.trim();
+            const quoteChildren = [];
+            if (dayRangeArrow) {
+                const { wrapper, arrowSpan } = createArrowSpan(dayRangeArrow, dayRangeArrow === '↑' ? 'Day high' : 'Day low');
+                arrowSpan.className = dayRangeArrow === '↑' ? 'arrow-up' : 'arrow-down';
+                quoteChildren.push(wrapper);
+            }
+            if (arrowSymbol) {
+                const { wrapper, arrowSpan } = createArrowSpan(arrowSymbol, arrowSymbol === '↑' ? 'Tick up' : 'Tick down');
+                arrowSpan.className = arrowClass;
+                quoteChildren.push(wrapper);
+            }
+            const formattedQuote = formatNumber(stock.quote, numberFormatters.price);
+            quoteChildren.push(document.createTextNode(`${quoteChildren.length ? ' ' : ''}${formattedQuote}`));
+            cells.quote.replaceChildren(...quoteChildren);
 
-        cells.change.className = fontClass;
-        cells.change.textContent = formatNumber(stock.change, numberFormatters.price);
-        cells.pct.className = fontClass;
-        cells.pct.textContent = stock.pctChange === 'N/A'
-            ? 'N/A'
-            : `${formatNumber(stock.pctChange, numberFormatters.percent)}%`;
-        cells.preClose.textContent = formatNumber(stock.preClose, numberFormatters.price);
-        cells.open.textContent = formatNumber(stock.open, numberFormatters.price);
-        cells.high.textContent = formatNumber(stock.high, numberFormatters.price);
-        cells.low.textContent = formatNumber(stock.low, numberFormatters.price);
-        cells.turnover.textContent = formatNumber(stock.turnover, numberFormatters.turnover);
+            cells.change.className = fontClass;
+            const changeIndicator = createTrendIndicator(dayDirectionFromValues(priceVal, preCloseVal));
+            const changeText = document.createTextNode(formatNumber(stock.change, numberFormatters.price));
+            cells.change.replaceChildren(...[changeIndicator, changeText].filter(Boolean));
 
-        const deleteButton = createButton({
-            className: 'btn-delete',
-            title: 'Remove Stock',
-            text: '✕',
-            onClick: () => removeStock(stock.code)
+            cells.pct.className = fontClass;
+            const pctText = stock.pctChange === 'N/A'
+                ? 'N/A'
+                : `${formatNumber(stock.pctChange, numberFormatters.percent)}%`;
+            const pctIndicator = createTrendIndicator(dayDirectionFromValues(priceVal, preCloseVal));
+            cells.pct.replaceChildren(...[pctIndicator, document.createTextNode(pctText)].filter(Boolean));
+            cells.preClose.textContent = formatNumber(stock.preClose, numberFormatters.price);
+            cells.open.textContent = formatNumber(stock.open, numberFormatters.price);
+            cells.high.textContent = formatNumber(stock.high, numberFormatters.price);
+            cells.low.textContent = formatNumber(stock.low, numberFormatters.price);
+            cells.turnover.textContent = formatNumber(stock.turnover, numberFormatters.turnover);
+
+            const deleteButton = createButton({
+                className: 'btn-delete',
+                title: 'Remove Stock',
+                text: '✕',
+                onClick: () => removeStock(stock.code)
+            });
+            cells.action.replaceChildren(deleteButton);
+
+            fragment.appendChild(row);
         });
-        cells.action.replaceChildren(deleteButton);
 
-        fragment.appendChild(row);
-    });
+        rowCache.forEach((_value, code) => {
+            if (!seenCodes.has(code)) rowCache.delete(code);
+        });
 
-    rowCache.forEach((_value, code) => {
-        if (!seenCodes.has(code)) rowCache.delete(code);
-    });
+        tbody.replaceChildren(fragment);
 
-    tbody.replaceChildren(fragment);
+        dom.currentTime.textContent = `Last updated: ${new Date().toLocaleString()}`;
 
-    dom.currentTime.textContent = new Date().toLocaleString();
-
-    updateIndexDisplay('hsi', hsiData);
-    updateIndexDisplay('china_index', hsceiData);
+        updateIndexDisplay('hsi', hsiData);
+        updateIndexDisplay('china_index', hsceiData);
+        indexDataCache = {
+            hsi: hsiData,
+            china_index: hsceiData
+        };
+    } finally {
+        isRefreshing = false;
+    }
 }
 
 // --- NEW: Dynamic Index Arrow Logic ---
@@ -650,6 +769,14 @@ function updateIndexDisplay(prefix, data) {
     arrowEl.textContent = arrow;
     arrowEl.className = arrow === '↑' ? 'up' : arrow === '↓' ? 'down' : '';
     arrowEl.setAttribute('aria-label', arrow === '↑' ? 'Index tick up' : 'Index tick down');
+}
+
+function dayDirectionFromValues(priceVal, preCloseVal) {
+    if (!isNaN(priceVal) && !isNaN(preCloseVal)) {
+        if (priceVal > preCloseVal) return 'up';
+        if (priceVal < preCloseVal) return 'down';
+    }
+    return 'none';
 }
 
 // --- Resizing & Persistence ---
@@ -714,6 +841,10 @@ function initControls() {
     dom.addStockButton.addEventListener('click', addStock);
     dom.setRefreshButton.addEventListener('click', setRefreshInterval);
     dom.resetButton.addEventListener('click', resetDefaults);
+    dom.sortButton.addEventListener('click', () => {
+        const nextDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+        setSortDirection(nextDirection);
+    });
 
     dom.newStockInput.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') addStock();
@@ -735,6 +866,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     dom.addStockButton = document.getElementById('addStockButton');
     dom.setRefreshButton = document.getElementById('setRefreshButton');
     dom.resetButton = document.getElementById('resetButton');
+    dom.sortButton = document.getElementById('sortButton');
+    dom.addStockMessage = document.getElementById('addStockMessage');
+    dom.refreshMessage = document.getElementById('refreshMessage');
 
     indexElements.hsi = {
         valueEl: document.getElementById('hsi_value'),
@@ -749,6 +883,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         wrapperEl: document.getElementById('hscei-wrapper')
     };
     loadRefreshInterval();
+    loadSortDirection();
     loadStockList();
     await loadHolidayCalendar();
     initResizableColumns();

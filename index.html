@@ -15,7 +15,7 @@
         <div class="header">
             <div id="hsi-wrapper" class="index" style="padding-left: 20px;">恒指: <span id="hsi_value">-</span> <span id="hsi_change">-</span> <span id="hsi_arrow"></span></div>
             <div id="hscei-wrapper" class="index">國指: <span id="china_index_value">-</span> <span id="china_index_change">-</span> <span id="china_index_arrow"></span></div>
-            <div class="timestamp"><span id="current_time">Loading...</span></div>
+            <div class="timestamp" aria-live="polite"><span id="current_time">Last updated: Loading...</span></div>
         </div>
 
         <table id="stockTable">
@@ -42,7 +42,7 @@
 
         <div style="margin-top: 10px; text-align: center; color: #666; font-style: italic;">
             Next refresh: <span id="nextRefresh">Calculating...</span> |
-            Status: <span id="status">Checking...</span>
+            Status: <span id="status" aria-live="polite">Checking...</span>
         </div>
 
         <div class="controls">
@@ -50,13 +50,16 @@
                 <label for="newStockInput"><strong>Add Stock:</strong></label>
                 <input type="number" id="newStockInput" class="input-code" placeholder="Code (e.g. 700)">
                 <button id="addStockButton" class="btn btn-add">Add</button>
+                <span id="addStockMessage" class="input-message" role="status" aria-live="polite"></span>
             </div>
             <div class="divider"></div>
             <div class="control-group">
                 <label for="refreshInput"><strong>Refresh (sec):</strong></label>
                 <input type="number" id="refreshInput" class="input-interval" value="30" min="3">
                 <button id="setRefreshButton" class="btn btn-set">Set</button>
+                <span id="refreshMessage" class="input-message" role="status" aria-live="polite"></span>
             </div>
+            <button id="sortButton" class="btn btn-sort">Sort: Asc</button>
             <button id="resetButton" class="btn btn-reset">Reset Default List</button>
         </div>
     </div>
