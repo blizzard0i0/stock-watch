@@ -1,4 +1,5 @@
-const CACHE_NAME = 'hk-stock-store-v3';
+const CACHE_NAME = 'hk-stock-store-v4';
+const DATA_CACHE_NAME = 'hk-stock-data-v1';
 const PRECACHE_URLS = ['./', './index.html', './manifest.json', './icon.png', './styles.css', './main.js'];
 
 self.addEventListener('install', (event) => {
@@ -11,7 +12,11 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.map((key) => (key !== CACHE_NAME ? caches.delete(key) : null)))
+      Promise.all(
+        keys.map((key) => (
+          key !== CACHE_NAME && key !== DATA_CACHE_NAME ? caches.delete(key) : null
+        ))
+      )
     )
   );
   self.clients.claim();
@@ -21,7 +26,19 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const requestUrl = new URL(event.request.url);
   if (requestUrl.origin !== self.location.origin) {
-    event.respondWith(fetch(event.request));
+    event.respondWith(
+      caches.open(DATA_CACHE_NAME).then((cache) =>
+        cache.match(event.request).then((cached) => {
+          const fetchPromise = fetch(event.request)
+            .then((response) => {
+              if (response) cache.put(event.request, response.clone());
+              return response;
+            })
+            .catch(() => cached);
+          return cached || fetchPromise;
+        })
+      )
+    );
     return;
   }
 
