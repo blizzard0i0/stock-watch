@@ -28,15 +28,14 @@ self.addEventListener('fetch', (event) => {
   if (requestUrl.origin !== self.location.origin) {
     event.respondWith(
       caches.open(DATA_CACHE_NAME).then((cache) =>
-        cache.match(event.request).then((cached) => {
-          const fetchPromise = fetch(event.request)
+        cache.match(event.request).then((cached) =>
+          fetch(event.request)
             .then((response) => {
               if (response) cache.put(event.request, response.clone());
               return response;
             })
-            .catch(() => cached);
-          return cached || fetchPromise;
-        })
+            .catch(() => cached)
+        )
       )
     );
     return;
