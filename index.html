@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta chars<link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#007bff">
+    <link rel="apple-touch-icon" href="icon.png">et="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hong Kong Stock Watchlist (Smart Schedule)</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 10px;
+            background-color: #f5f5f5;
+            padding-bottom: 20px;
+        }
+        .container {
+            width: 95%;
+            max-width: 1600px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow-x: auto;
+        }
+        
+        /* --- Table Styling --- */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-weight: bold;
+        }
+        .index { color: blue; }
+        .timestamp { text-align: right; color: black; }
+        
+        table {
+            border-collapse: collapse;
+            font-size: 14px;
+            table-layout: fixed;
+            width: 100%;
+            min-width: 100%;
+        }
+        
+        th, td {
+            padding: 6px 4px;
+            text-align: right;
+            border-bottom: 1px solid #ddd;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            box-sizing: border-box;
+        }
+        
+        th:nth-last-child(2), td:nth-last-child(2) { text-align: center; }
+
+        th {
+            background-color: #e0e0e0;
+            font-weight: bold;
+            position: relative;
+            user-select: none; 
+            -webkit-user-select: none;
+        }
+        
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        
+        /* --- Arrows --- */
+        .arrow-up { font-weight: bold; }
+        .arrow-down { font-weight: bold; }
+        .arrow-none { color: #ccc; }
+
+        /* --- Row Highlight --- */
+        .highlight { background-color: #ffff99 !important; }
+
+        /* --- Logic-Based Colors --- */
+        .style-flat, .style-flat a { color: black !important; }
+        .style-rise-small, .style-rise-small a { color: #4169E1 !important; }
+        .style-rise-big, .style-rise-big a { color: #0000ff !important; }
+        .style-fall-small, .style-fall-small a { color: #FF4500 !important; }
+        .style-fall-big, .style-fall-big a { color: red !important; }
+
+        /* --- Link Styling --- */
+        .stock-link {
+            text-decoration: none;
+            cursor: pointer;
+            display: block;
+            font-weight: normal; 
+        }
+        .stock-link:hover {
+            text-decoration: underline;
+        }
+        
+        .stock-no { text-align: right; font-weight: normal; } 
+        .stock-name { text-align: right; font-weight: normal; }
+        .rt-quote { text-align: right; font-weight: bold; } 
+
+        .resizer {
+            display: inline-block;
+            width: 10px;
+            height: 100%;
+            position: absolute;
+            right: 0;
+            top: 0;
+            cursor: col-resize;
+            z-index: 10;
+        }
+        .resizer:hover { background: rgba(0, 0, 0, 0.1); }
+        .resizer.isResizing { background: rgba(0, 0, 255, 0.3); }
+
+        /* --- Control Panel --- */
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f0f7ff;
+            border-radius: 5px;
+            align-items: center;
+            border-top: 1px solid #ddd;
+            flex-wrap: wrap;
+        }
+        .control-group { display: flex; align-items: center; gap: 5px; }
+        .controls input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        .input-code { width: 120px; }
+        .input-interval { width: 60px; }
+
+        .btn { padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; color: white; }
+        .btn-add { background-color: #28a745; }
+        .btn-add:hover { background-color: #218838; }
+        .btn-set { background-color: #007bff; }
+        .btn-set:hover { background-color: #0056b3; }
+        .btn-reset { background-color: #6c757d; margin-left: auto; font-size: 0.9em;}
+        .btn-delete { background-color: #dc3545; color: white; border: none; border-radius: 3px; width: 24px; height: 24px; cursor: pointer; line-height: 24px; text-align: center; padding: 0; font-size: 14px; }
+        .btn-delete:hover { background-color: #c82333; }
+        .divider { width: 1px; height: 30px; background-color: #ccc; margin: 0 10px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="index">恒指: <span id="hsi_value">-</span> <span id="hsi_change">-</span> <span id="hsi_arrow"></span></div>
+            <div class="index">國指: <span id="china_index_value">-</span> <span id="china_index_change">-</span> <span id="china_index_arrow"></span></div>
+            <div class="timestamp"><span id="current_time">Loading...</span></div>
+        </div>
+
+        <table id="stockTable">
+            <thead>
+                <tr id="headerRow">
+                    <th style="width: 60px">No<div class="resizer"></div></th>
+                    <th style="width: 120px">Name<div class="resizer"></div></th>
+                    <th style="width: 90px">Price<div class="resizer"></div></th>
+                    <th style="width: 70px">Change<div class="resizer"></div></th>
+                    <th style="width: 70px">%<div class="resizer"></div></th>
+                    <th style="width: 70px">PreCls<div class="resizer"></div></th>
+                    <th style="width: 70px">Open<div class="resizer"></div></th>
+                    <th style="width: 70px">High<div class="resizer"></div></th>
+                    <th style="width: 70px">Low<div class="resizer"></div></th>
+                    <th style="width: 90px">Turnover<div class="resizer"></div></th>
+                    <th style="width: 50px">Action<div class="resizer"></div></th>
+                    <th style="width: 50px"><div class="resizer"></div></th>
+                </tr>
+            </thead>
+            <tbody id="stockData">
+                <tr><td colspan="12">Loading data...</td></tr>
+            </tbody>
+        </table>
+
+        <div style="margin-top: 10px; text-align: center; color: #666; font-style: italic;">
+            Next refresh: <span id="nextRefresh">Calculating...</span> |
+            Status: <span id="status">Checking...</span>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <label for="newStockInput"><strong>Add Stock:</strong></label>
+                <input type="number" id="newStockInput" class="input-code" placeholder="Code (e.g. 700)" onkeydown="if(event.key === 'Enter') addStock()">
+                <button class="btn btn-add" onclick="addStock()">Add</button>
+            </div>
+            <div class="divider"></div>
+            <div class="control-group">
+                <label for="refreshInput"><strong>Refresh (sec):</strong></label>
+                <input type="number" id="refreshInput" class="input-interval" value="20" min="3" onkeydown="if(event.key === 'Enter') setRefreshInterval()">
+                <button class="btn btn-set" onclick="setRefreshInterval()">Set</button>
+            </div>
+            <button class="btn btn-reset" onclick="resetDefaults()">Reset Default List</button>
+        </div>
+    </div>
+
+    <script>
+        const DEFAULT_CODES = ['00005', '00388', '00700', '01183', '01195', '01458', '02317', '02391', '02592', '9896', '9988', '9992', '55852'];
+        const STORAGE_KEY_COLS = 'hk_stock_cols_v6'; 
+        const STORAGE_KEY_LIST = 'hk_stock_list_v1';
+        const STORAGE_KEY_INTERVAL = 'hk_stock_interval_v1';
+
+        let stockCodes = [];
+        let stockStates = {}; 
+        let refreshTimer = null;
+        let refreshRateSec = 20;
+
+        // --- Core Time Constants ---
+        const TRADE_START_HOUR = 9;
+        const TRADE_START_MIN = 0;  // 9:00
+        const TRADE_END_HOUR = 16;
+        const TRADE_END_MIN = 10;   // 16:10
+
+        function sortStocks() {
+            stockCodes.sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+        }
+
+        function loadStockList() {
+            const stored = localStorage.getItem(STORAGE_KEY_LIST);
+            if (stored) {
+                try { stockCodes = JSON.parse(stored); } catch (e) { stockCodes = [...DEFAULT_CODES]; }
+            } else { stockCodes = [...DEFAULT_CODES]; }
+            sortStocks();
+        }
+
+        function saveStockList() { localStorage.setItem(STORAGE_KEY_LIST, JSON.stringify(stockCodes)); }
+
+        function loadRefreshInterval() {
+            const stored = localStorage.getItem(STORAGE_KEY_INTERVAL);
+            if (stored) {
+                const val = parseInt(stored, 10);
+                if (!isNaN(val) && val >= 3) refreshRateSec = val;
+            }
+            document.getElementById('refreshInput').value = refreshRateSec;
+        }
+
+        function setRefreshInterval() {
+            const input = document.getElementById('refreshInput');
+            let val = parseInt(input.value, 10);
+            if (isNaN(val) || val < 3) { alert("Please enter a valid interval (minimum 3 seconds)."); input.value = refreshRateSec; return; }
+            refreshRateSec = val;
+            localStorage.setItem(STORAGE_KEY_INTERVAL, refreshRateSec);
+            // Re-evalute schedule immediately
+            scheduleNextRefresh();
+        }
+
+        // --- NEW: Time Logic ---
+        function isTradingHours() {
+            const now = new Date();
+            const dayOfWeek = now.getDay(); // 0=Sun, 6=Sat
+            const hour = now.getHours();
+            const minute = now.getMinutes();
+            const timeVal = hour * 100 + minute;
+            
+            const startVal = TRADE_START_HOUR * 100 + TRADE_START_MIN; // 900
+            const endVal = TRADE_END_HOUR * 100 + TRADE_END_MIN;       // 1610
+
+            // Weekdays only
+            if (dayOfWeek < 1 || dayOfWeek > 5) return false;
+            
+            // Time range check
+            return timeVal >= startVal && timeVal <= endVal;
+        }
+
+        function getNextTradingTime() {
+            const now = new Date();
+            let target = new Date(now);
+            
+            // Set target time to 9:00 AM of current target day
+            target.setHours(TRADE_START_HOUR, TRADE_START_MIN, 0, 0);
+
+            // Logic to find next 9am weekday
+            // 1. If today is Fri/Sat/Sun, move to Monday
+            // 2. If today is Weekday but past 16:10, move to tomorrow
+            // 3. If today is Weekday but before 9:00, keep today (target already set to 9am today)
+
+            const dayOfWeek = now.getDay();
+            const hour = now.getHours();
+            const minute = now.getMinutes();
+            const timeVal = hour * 100 + minute;
+            const endVal = TRADE_END_HOUR * 100 + TRADE_END_MIN;
+
+            if (dayOfWeek === 6) { // Saturday -> Monday
+                target.setDate(now.getDate() + 2);
+            } else if (dayOfWeek === 0) { // Sunday -> Monday
+                target.setDate(now.getDate() + 1);
+            } else if (dayOfWeek === 5 && timeVal > endVal) { // Friday after close -> Monday
+                target.setDate(now.getDate() + 3);
+            } else if (timeVal > endVal) { // Mon-Thu after close -> Tomorrow
+                target.setDate(now.getDate() + 1);
+            }
+            // Else: it's a weekday morning before 9am, target is already set to 9am today.
+
+            return target;
+        }
+
+        function scheduleNextRefresh() {
+            if (refreshTimer) clearTimeout(refreshTimer); // Clear any existing timeout
+
+            const statusEl = document.getElementById('status');
+            const nextRefreshEl = document.getElementById('nextRefresh');
+            
+            if (isTradingHours()) {
+                // Case A: Inside Trading Hours -> Regular Interval
+                statusEl.textContent = 'Active (Mon-Fri 9:00-16:10)';
+                statusEl.style.color = '#006600';
+                
+                // Refresh immediately if this was a manual trigger or just started
+                // Then schedule next
+                const nextTime = new Date(new Date().getTime() + (refreshRateSec * 1000));
+                nextRefreshEl.textContent = nextTime.toLocaleTimeString();
+                
+                refreshTimer = setTimeout(() => {
+                    updateStockTable().then(() => {
+                        scheduleNextRefresh(); // Recursive loop
+                    });
+                }, refreshRateSec * 1000);
+
+            } else {
+                // Case B: Outside Trading Hours -> Schedule for 9am
+                const nextStart = getNextTradingTime();
+                const now = new Date();
+                const delay = nextStart.getTime() - now.getTime();
+
+                statusEl.textContent = 'Market Closed. Scheduled for next open.';
+                statusEl.style.color = '#cc6600';
+                
+                // Format display nicely
+                const dateStr = nextStart.toLocaleDateString() + ' ' + nextStart.toLocaleTimeString();
+                nextRefreshEl.textContent = dateStr;
+
+                // Schedule the wake-up
+                if (delay > 0) {
+                    refreshTimer = setTimeout(() => {
+                        updateStockTable().then(() => {
+                            scheduleNextRefresh(); // Once woken up, enter loop
+                        });
+                    }, delay);
+                } else {
+                    // Fallback if calculation slightly off, check again in 1 sec
+                    refreshTimer = setTimeout(scheduleNextRefresh, 1000);
+                }
+            }
+        }
+
+        // --- Standard Operations ---
+        function addStock() {
+            const input = document.getElementById('newStockInput');
+            let code = input.value.trim();
+            if (!code) return;
+            while (code.length < 5) code = "0" + code;
+            if (stockCodes.includes(code)) { alert('Stock already in list!'); input.value = ''; return; }
+            stockCodes.push(code);
+            sortStocks();
+            saveStockList();
+            input.value = '';
+            updateStockTable(); 
+        }
+
+        function removeStock(code) {
+            stockCodes = stockCodes.filter(c => c !== code);
+            saveStockList();
+            updateStockTable();
+        }
+
+        function resetDefaults() {
+            if (confirm("Reset to original stock list?")) {
+                stockCodes = [...DEFAULT_CODES];
+                sortStocks();
+                saveStockList();
+                updateStockTable();
+            }
+        }
+
+        async function fetchStockData(code) {
+            try {
+                const response = await fetch(`https://realtime-money18-cdn.on.cc/securityQuote/genStockDetailHKJSON.php?stockcode=${code}`);
+                const data = await response.json();
+                const prevClose = parseFloat(data.daily.preCPrice);
+                const currentPrice = parseFloat(data.real.np);
+                let change = 'N/A', pctChange = 'N/A', dayDirection = 'none';
+
+                if (!isNaN(prevClose) && !isNaN(currentPrice)) {
+                    const rawChange = currentPrice - prevClose;
+                    change = rawChange.toFixed(3).replace(/\.?0+$/, '');
+                    pctChange = (((currentPrice - prevClose) / prevClose) * 100).toFixed(2);
+                    dayDirection = currentPrice > prevClose ? 'up' : currentPrice < prevClose ? 'down' : 'none';
+                }
+
+                return {
+                    code: code,
+                    name: data.daily.nameChi || 'N/A',
+                    quote: currentPrice !== 'N/A' ? currentPrice : 'N/A',
+                    change: change, pctChange: pctChange, preClose: data.daily.preCPrice || 'N/A',
+                    open: data.opening.openPrice || 'N/A', high: data.real.dyh || 'N/A', low: data.real.dyl || 'N/A',
+                    turnover: (parseInt(data.real.tvr) / 1000000).toFixed(2) || 'N/A',
+                    dayDirection: dayDirection
+                };
+            } catch (error) {
+                return { code, name: 'ERROR', quote: 'N/A', change: 'N/A', pctChange: 'N/A', preClose: 'N/A', open: 'N/A', high: 'N/A', low: 'N/A', turnover: 'N/A', dayDirection: 'none' };
+            }
+        }
+
+        async function fetchIndexData(indexCode) {
+            try {
+                const response = await fetch(`https://realtime-money18-cdn.on.cc/securityQuote/genIndexDetailHKJSON.php?code=${indexCode}`);
+                const data = await response.json();
+                return { value: data.real.value || 'N/A', difference: data.real.difference || 'N/A' };
+            } catch (error) { return { value: 'N/A', difference: 'N/A' }; }
+        }
+
+        function getTickArrow(code, currentPriceStr, dayDirection) {
+            const currentPrice = parseFloat(currentPriceStr);
+            if (isNaN(currentPrice)) return '';
+            let arrow = ''; 
+            if (stockStates[code]) {
+                const lastPrice = stockStates[code].lastPrice;
+                const lastArrow = stockStates[code].arrow;
+                if (currentPrice > lastPrice) arrow = '↑';
+                else if (currentPrice < lastPrice) arrow = '↓';
+                else arrow = lastArrow;
+            } else {
+                if (dayDirection === 'up') arrow = '↑';
+                else if (dayDirection === 'down') arrow = '↓';
+            }
+            stockStates[code] = { lastPrice: currentPrice, arrow: arrow };
+            return arrow;
+        }
+
+        async function updateStockTable() {
+            const tbody = document.getElementById('stockData');
+            if (tbody.children.length === 0) tbody.innerHTML = '<tr><td colspan="12">Loading data...</td></tr>';
+
+            const stockPromises = stockCodes.map(code => fetchStockData(code));
+            const [stockData, hsiData, hsceiData] = await Promise.all([
+                Promise.all(stockPromises), fetchIndexData('HSI'), fetchIndexData('HSCEI')
+            ]);
+
+            tbody.innerHTML = '';
+            stockData.forEach(stock => {
+                const row = document.createElement('tr');
+                const pctValue = parseFloat(stock.pctChange);
+                const priceVal = parseFloat(stock.quote);
+                const preCloseVal = parseFloat(stock.preClose);
+                const highVal = parseFloat(stock.high);
+                const lowVal = parseFloat(stock.low);
+
+                if (!isNaN(pctValue) && (pctValue > 10 || pctValue < -10)) row.classList.add('highlight');
+
+                let fontClass = '';
+                if (!isNaN(priceVal) && !isNaN(preCloseVal)) {
+                    if (priceVal === preCloseVal) { fontClass = 'style-flat'; } 
+                    else if (priceVal > preCloseVal) {
+                        if (pctValue > 5) fontClass = 'style-rise-big'; else fontClass = 'style-rise-small';
+                    } else {
+                        if (pctValue < -5) fontClass = 'style-fall-big'; else fontClass = 'style-fall-small';
+                    }
+                }
+
+                const arrowSymbol = getTickArrow(stock.code, stock.quote, stock.dayDirection);
+                const arrowClass = arrowSymbol === '↑' ? 'arrow-up' : arrowSymbol === '↓' ? 'arrow-down' : 'arrow-none';
+
+                let dayRangeArrow = '';
+                if (!isNaN(priceVal)) {
+                    if (!isNaN(highVal) && priceVal >= highVal && priceVal > 0) dayRangeArrow = '<span class="arrow-up">↑</span>'; 
+                    else if (!isNaN(lowVal) && priceVal <= lowVal && priceVal > 0) dayRangeArrow = '<span class="arrow-down">↓</span>'; 
+                }
+
+                const displayCode = stock.code.replace(/^0+(\d+)/, '$1');
+                const linkUrlQuote = `https://www.aastocks.com/tc/stocks/quote/detail-quote.aspx?symbol=${stock.code}`;
+                const linkUrlTransaction = `http://www.etnet.com.hk/www/tc/stocks/realtime/quote_transaction.php?code=${displayCode}`;
+
+                row.innerHTML = `
+                    <td class="stock-no ${fontClass}">
+                        <a href="${linkUrlQuote}" target="_blank" class="stock-link">${displayCode}</a>
+                    </td>
+                    <td class="stock-name ${fontClass}">
+                        <a href="${linkUrlTransaction}" target="_blank" class="stock-link">${stock.name}</a>
+                    </td>
+                    <td class="rt-quote ${fontClass}">
+                        ${dayRangeArrow}
+                        <span class="${arrowClass}">${arrowSymbol}</span> 
+                        ${stock.quote}
+                    </td>
+                    <td class="${fontClass}">${stock.change}</td>
+                    <td class="${fontClass}">${stock.pctChange}%</td>
+                    <td>${stock.preClose}</td>
+                    <td>${stock.open}</td>
+                    <td>${stock.high}</td>
+                    <td>${stock.low}</td>
+                    <td>${stock.turnover}</td>
+                    <td><button class="btn-delete" onclick="removeStock('${stock.code}')" title="Remove Stock">✕</button></td>
+                    <td></td>
+                `;
+                tbody.appendChild(row);
+            });
+
+            document.getElementById('current_time').textContent = new Date().toLocaleString();
+            updateIndexDisplay('hsi', hsiData);
+            updateIndexDisplay('china_index', hsceiData);
+        }
+
+        function updateIndexDisplay(prefix, data) {
+            document.getElementById(`${prefix}_value`).textContent = data.value;
+            const diff = parseFloat(data.difference);
+            document.getElementById(`${prefix}_change`).textContent = (diff > 0 ? '+' : '') + data.difference;
+            const arrowEl = document.getElementById(`${prefix}_arrow`);
+            arrowEl.textContent = diff > 0 ? '↑' : diff < 0 ? '↓' : '';
+            arrowEl.className = diff > 0 ? 'up' : diff < 0 ? 'down' : '';
+        }
+
+        // --- Resizing & Persistence ---
+        function saveColumnSettings() {
+            const headers = document.querySelectorAll('#stockTable th');
+            const widths = [];
+            headers.forEach(th => widths.push(th.style.width)); 
+            const tableWidth = document.getElementById('stockTable').style.width;
+            localStorage.setItem(STORAGE_KEY_COLS, JSON.stringify({ colWidths: widths, tableWidth: tableWidth }));
+        }
+
+        function loadColumnSettings() {
+            const stored = localStorage.getItem(STORAGE_KEY_COLS);
+            if (stored) {
+                try {
+                    const settings = JSON.parse(stored);
+                    const headers = document.querySelectorAll('#stockTable th');
+                    const table = document.getElementById('stockTable');
+                    if (settings.colWidths && settings.colWidths.length === headers.length) {
+                        headers.forEach((th, i) => { if (settings.colWidths[i]) th.style.width = settings.colWidths[i]; });
+                    }
+                    if (settings.tableWidth) table.style.width = settings.tableWidth;
+                } catch (e) { console.error("Load error", e); }
+            }
+        }
+
+        function initResizableColumns() {
+            loadColumnSettings();
+            const table = document.getElementById('stockTable');
+            const resizers = table.querySelectorAll('.resizer');
+            const headers = table.querySelectorAll('th');
+            let startX, startColWidth, startTableWidth, currentHeader;
+            resizers.forEach((resizer, index) => {
+                resizer.addEventListener('mousedown', function(e) {
+                    e.preventDefault();
+                    currentHeader = headers[index];
+                    startX = e.clientX;
+                    startColWidth = currentHeader.offsetWidth;
+                    startTableWidth = table.offsetWidth;
+                    headers.forEach(th => { th.style.width = th.offsetWidth + 'px'; });
+                    table.style.width = startTableWidth + 'px';
+                    resizer.classList.add('isResizing');
+                    document.addEventListener('mousemove', onMouseMove);
+                    document.addEventListener('mouseup', onMouseUp);
+                });
+            });
+            function onMouseMove(e) {
+                const diffX = e.clientX - startX;
+                currentHeader.style.width = Math.max(30, startColWidth + diffX) + 'px';
+                table.style.width = Math.max(startTableWidth + diffX, 100) + 'px'; 
+            }
+            function onMouseUp() {
+                const activeResizer = table.querySelector('.resizer.isResizing');
+                if (activeResizer) activeResizer.classList.remove('isResizing');
+                document.removeEventListener('mousemove', onMouseMove);
+                document.removeEventListener('mouseup', onMouseUp);
+                saveColumnSettings();
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadRefreshInterval();
+            loadStockList(); 
+            initResizableColumns();
+            
+            // Initial data load, then start smart schedule
+            updateStockTable().then(() => { 
+                scheduleNextRefresh(); 
+            });
+        });
+    </script>
+    <script>
+      // Register Service Worker for PWA
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker
+          .register('./sw.js')
+          .then(() => { console.log('Service Worker Registered'); });
+      }
+    </script>
+</body>
+</html>
