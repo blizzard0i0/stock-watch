@@ -201,6 +201,9 @@
 
         let stockCodes = [];
         let stockStates = {}; 
+        const dom = {};
+        const indexElements = {};
+        const rowCache = new Map();
         
         // --- NEW: State for Index Arrows ---
         let indexStates = {
@@ -236,11 +239,11 @@
                 const val = parseInt(stored, 10);
                 if (!isNaN(val) && val >= 3) refreshRateSec = val;
             }
-            document.getElementById('refreshInput').value = refreshRateSec;
+            dom.refreshInput.value = refreshRateSec;
         }
 
         function setRefreshInterval() {
-            const input = document.getElementById('refreshInput');
+            const input = dom.refreshInput;
             let val = parseInt(input.value, 10);
             if (isNaN(val) || val < 3) { alert("Please enter a valid interval (minimum 3 seconds)."); input.value = refreshRateSec; return; }
             refreshRateSec = val;
@@ -279,8 +282,8 @@
 
         function scheduleNextRefresh() {
             if (refreshTimer) clearTimeout(refreshTimer);
-            const statusEl = document.getElementById('status');
-            const nextRefreshEl = document.getElementById('nextRefresh');
+            const statusEl = dom.status;
+            const nextRefreshEl = dom.nextRefresh;
             
             if (isTradingHours()) {
                 statusEl.textContent = 'Active (Mon-Fri 9:00-16:10)';
@@ -309,7 +312,7 @@
         }
 
         function addStock() {
-            const input = document.getElementById('newStockInput');
+            const input = dom.newStockInput;
             let code = input.value.trim();
             if (!code) return;
             while (code.length < 5) code = "0" + code;
@@ -391,8 +394,58 @@
             return arrow;
         }
 
+        function createCell(tag, className, text) {
+            const cell = document.createElement(tag);
+            if (className) cell.className = className;
+            if (text !== undefined) cell.textContent = text;
+            return cell;
+        }
+
+        function getRowForStock(code) {
+            if (rowCache.has(code)) return rowCache.get(code);
+
+            const row = document.createElement('tr');
+            const cells = {
+                no: createCell('td', 'stock-no'),
+                name: createCell('td', 'stock-name'),
+                quote: createCell('td', 'rt-quote'),
+                change: createCell('td', ''),
+                pct: createCell('td', ''),
+                preClose: createCell('td', ''),
+                open: createCell('td', ''),
+                high: createCell('td', ''),
+                low: createCell('td', ''),
+                turnover: createCell('td', ''),
+                action: createCell('td', ''),
+                spacer: createCell('td', '')
+            };
+
+            row.append(
+                cells.no,
+                cells.name,
+                cells.quote,
+                cells.change,
+                cells.pct,
+                cells.preClose,
+                cells.open,
+                cells.high,
+                cells.low,
+                cells.turnover,
+                cells.action,
+                cells.spacer
+            );
+
+            rowCache.set(code, { row, cells });
+            return rowCache.get(code);
+        }
+
         async function updateStockTable() {
-            const tbody = document.getElementById('stockData');
+            const tbody = dom.tbody;
+            if (stockCodes.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="12">No stocks in list.</td></tr>';
+                rowCache.clear();
+                return;
+            }
             if (tbody.children.length === 0) tbody.innerHTML = '<tr><td colspan="12">Loading data...</td></tr>';
 
             const stockPromises = stockCodes.map(code => fetchStockData(code));
@@ -400,9 +453,12 @@
                 Promise.all(stockPromises), fetchIndexData('HSI'), fetchIndexData('HSCEI')
             ]);
 
-            tbody.innerHTML = '';
+            const fragment = document.createDocumentFragment();
+            const seenCodes = new Set();
+
             stockData.forEach(stock => {
-                const row = document.createElement('tr');
+                seenCodes.add(stock.code);
+                const { row, cells } = getRowForStock(stock.code);
                 const pctValue = parseFloat(stock.pctChange);
                 const priceVal = parseFloat(stock.quote);
                 const preCloseVal = parseFloat(stock.preClose);
@@ -410,7 +466,7 @@
                 const lowVal = parseFloat(stock.low);
 
                 // --- 1. Row Highlight (Extreme Moves) ---
-                if (!isNaN(pctValue) && (pctValue > 10 || pctValue < -10)) row.classList.add('highlight');
+                row.className = (!isNaN(pctValue) && (pctValue > 10 || pctValue < -10)) ? 'highlight' : '';
 
                 // --- 2. Color Logic for Columns 1-5 ---
                 let fontClass = '';
@@ -441,53 +497,89 @@
                 // --- 5. Extra Day High/Low Arrow ---
                 let dayRangeArrow = '';
                 if (!isNaN(priceVal)) {
-                    if (!isNaN(highVal) && priceVal >= highVal && priceVal > 0) dayRangeArrow = '<span class="arrow-up">↑</span>'; 
-                    else if (!isNaN(lowVal) && priceVal <= lowVal && priceVal > 0) dayRangeArrow = '<span class="arrow-down">↓</span>'; 
+                    if (!isNaN(highVal) && priceVal >= highVal && priceVal > 0) dayRangeArrow = '↑'; 
+                    else if (!isNaN(lowVal) && priceVal <= lowVal && priceVal > 0) dayRangeArrow = '↓'; 
                 }
 
                 const displayCode = stock.code.replace(/^0+(\d+)/, '$1');
                 const linkUrlQuote = `https://www.aastocks.com/tc/stocks/quote/detail-quote.aspx?symbol=${stock.code}`;
                 const linkUrlTransaction = `http://www.etnet.com.hk/www/tc/stocks/realtime/quote_transaction.php?code=${displayCode}`;
 
-                row.innerHTML = `
-                    <td class="stock-no ${fontClass}">
-                        <a href="${linkUrlQuote}" target="_blank" class="stock-link">${displayCode}</a>
-                    </td>
-                    <td class="stock-name ${fontClass}">
-                        <a href="${linkUrlTransaction}" target="_blank" class="stock-link">${stock.name}</a>
-                    </td>
-                    <td class="rt-quote ${fontClass} ${bgTickClass}">
-                        ${dayRangeArrow}
-                        <span class="${arrowClass}">${arrowSymbol}</span> 
-                        ${stock.quote}
-                    </td>
-                    <td class="${fontClass}">${stock.change}</td>
-                    <td class="${fontClass}">${stock.pctChange}%</td>
-                    <td>${stock.preClose}</td>
-                    <td>${stock.open}</td>
-                    <td>${stock.high}</td>
-                    <td>${stock.low}</td>
-                    <td>${stock.turnover}</td>
-                    <td><button class="btn-delete" onclick="removeStock('${stock.code}')" title="Remove Stock">✕</button></td>
-                    <td></td>
-                `;
-                tbody.appendChild(row);
+                cells.no.className = `stock-no ${fontClass}`.trim();
+                cells.no.replaceChildren(Object.assign(document.createElement('a'), {
+                    href: linkUrlQuote,
+                    target: '_blank',
+                    className: 'stock-link',
+                    textContent: displayCode
+                }));
+
+                cells.name.className = `stock-name ${fontClass}`.trim();
+                cells.name.replaceChildren(Object.assign(document.createElement('a'), {
+                    href: linkUrlTransaction,
+                    target: '_blank',
+                    className: 'stock-link',
+                    textContent: stock.name
+                }));
+
+                cells.quote.className = `rt-quote ${fontClass} ${bgTickClass}`.trim();
+                const quoteChildren = [];
+                if (dayRangeArrow) {
+                    const dayArrowSpan = document.createElement('span');
+                    dayArrowSpan.className = dayRangeArrow === '↑' ? 'arrow-up' : 'arrow-down';
+                    dayArrowSpan.textContent = dayRangeArrow;
+                    quoteChildren.push(dayArrowSpan);
+                }
+                if (arrowSymbol) {
+                    const tickArrowSpan = document.createElement('span');
+                    tickArrowSpan.className = arrowClass;
+                    tickArrowSpan.textContent = arrowSymbol;
+                    quoteChildren.push(tickArrowSpan);
+                }
+                quoteChildren.push(document.createTextNode(`${quoteChildren.length ? ' ' : ''}${stock.quote}`));
+                cells.quote.replaceChildren(...quoteChildren);
+
+                cells.change.className = fontClass;
+                cells.change.textContent = stock.change;
+                cells.pct.className = fontClass;
+                cells.pct.textContent = `${stock.pctChange}%`;
+                cells.preClose.textContent = stock.preClose;
+                cells.open.textContent = stock.open;
+                cells.high.textContent = stock.high;
+                cells.low.textContent = stock.low;
+                cells.turnover.textContent = stock.turnover;
+
+                const deleteButton = document.createElement('button');
+                deleteButton.className = 'btn-delete';
+                deleteButton.title = 'Remove Stock';
+                deleteButton.textContent = '✕';
+                deleteButton.addEventListener('click', () => removeStock(stock.code));
+                cells.action.replaceChildren(deleteButton);
+
+                fragment.appendChild(row);
             });
 
-            document.getElementById('current_time').textContent = new Date().toLocaleString();
+            rowCache.forEach((_value, code) => {
+                if (!seenCodes.has(code)) rowCache.delete(code);
+            });
+
+            tbody.replaceChildren(fragment);
+
+            dom.currentTime.textContent = new Date().toLocaleString();
             
-            updateIndexDisplay('hsi', hsiData, 'hsi-wrapper');
-            updateIndexDisplay('china_index', hsceiData, 'hscei-wrapper');
+            updateIndexDisplay('hsi', hsiData);
+            updateIndexDisplay('china_index', hsceiData);
         }
 
         // --- NEW: Dynamic Index Arrow Logic ---
-        function updateIndexDisplay(prefix, data, wrapperId) {
-            document.getElementById(`${prefix}_value`).textContent = data.value;
+        function updateIndexDisplay(prefix, data) {
+            const elements = indexElements[prefix];
+            if (!elements) return;
+            elements.valueEl.textContent = data.value;
             const diff = parseFloat(data.difference);
-            document.getElementById(`${prefix}_change`).textContent = (diff > 0 ? '+' : '') + data.difference;
+            elements.changeEl.textContent = (diff > 0 ? '+' : '') + data.difference;
             
-            const arrowEl = document.getElementById(`${prefix}_arrow`);
-            const wrapperEl = document.getElementById(wrapperId);
+            const arrowEl = elements.arrowEl;
+            const wrapperEl = elements.wrapperEl;
 
             // 1. Color Logic (Daily)
             if (diff > 0) {
@@ -531,10 +623,10 @@
 
         // --- Resizing & Persistence ---
         function saveColumnSettings() {
-            const headers = document.querySelectorAll('#stockTable th');
+            const headers = dom.stockTable.querySelectorAll('th');
             const widths = [];
             headers.forEach(th => widths.push(th.style.width)); 
-            const tableWidth = document.getElementById('stockTable').style.width;
+            const tableWidth = dom.stockTable.style.width;
             localStorage.setItem(STORAGE_KEY_COLS, JSON.stringify({ colWidths: widths, tableWidth: tableWidth }));
         }
 
@@ -543,8 +635,8 @@
             if (stored) {
                 try {
                     const settings = JSON.parse(stored);
-                    const headers = document.querySelectorAll('#stockTable th');
-                    const table = document.getElementById('stockTable');
+                    const headers = dom.stockTable.querySelectorAll('th');
+                    const table = dom.stockTable;
                     if (settings.colWidths && settings.colWidths.length === headers.length) {
                         headers.forEach((th, i) => { if (settings.colWidths[i]) th.style.width = settings.colWidths[i]; });
                     }
@@ -555,7 +647,7 @@
 
         function initResizableColumns() {
             loadColumnSettings();
-            const table = document.getElementById('stockTable');
+            const table = dom.stockTable;
             const resizers = table.querySelectorAll('.resizer');
             const headers = table.querySelectorAll('th');
             let startX, startColWidth, startTableWidth, currentHeader;
@@ -588,6 +680,25 @@
         }
 
         document.addEventListener('DOMContentLoaded', () => {
+            dom.refreshInput = document.getElementById('refreshInput');
+            dom.newStockInput = document.getElementById('newStockInput');
+            dom.tbody = document.getElementById('stockData');
+            dom.status = document.getElementById('status');
+            dom.nextRefresh = document.getElementById('nextRefresh');
+            dom.currentTime = document.getElementById('current_time');
+            dom.stockTable = document.getElementById('stockTable');
+            indexElements.hsi = {
+                valueEl: document.getElementById('hsi_value'),
+                changeEl: document.getElementById('hsi_change'),
+                arrowEl: document.getElementById('hsi_arrow'),
+                wrapperEl: document.getElementById('hsi-wrapper')
+            };
+            indexElements.china_index = {
+                valueEl: document.getElementById('china_index_value'),
+                changeEl: document.getElementById('china_index_change'),
+                arrowEl: document.getElementById('china_index_arrow'),
+                wrapperEl: document.getElementById('hscei-wrapper')
+            };
             loadRefreshInterval();
             loadStockList(); 
             initResizableColumns();
