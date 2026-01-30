@@ -1,6 +1,6 @@
-const CACHE_NAME = 'hk-stock-store-v4';
+const CACHE_NAME = 'hk-stock-store-v15';
 const DATA_CACHE_NAME = 'hk-stock-data-v1';
-const PRECACHE_URLS = ['./', './index.html', './manifest.json', './icon.png', './styles.css', './main.js'];
+const PRECACHE_URLS = ['./', './index.html', './manifest.json', './icon.png', './styles.css', './main.js?v=18'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -26,18 +26,8 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const requestUrl = new URL(event.request.url);
   if (requestUrl.origin !== self.location.origin) {
-    event.respondWith(
-      caches.open(DATA_CACHE_NAME).then((cache) =>
-        cache.match(event.request).then((cached) =>
-          fetch(event.request)
-            .then((response) => {
-              if (response) cache.put(event.request, response.clone());
-              return response;
-            })
-            .catch(() => cached)
-        )
-      )
-    );
+    // Do NOT cache cross-origin API responses. iOS/Safari may otherwise serve stale data.
+    event.respondWith(fetch(event.request, { cache: 'no-store' }));
     return;
   }
 

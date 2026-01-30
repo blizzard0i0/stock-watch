@@ -1,4 +1,4 @@
-const DEFAULT_CODES = ['00005', '00388', '00700', '9988', '9992'];
+const DEFAULT_CODES = ['00388', '00700', '01183', '01195', '01458', '02317', '02391', '02592', '9896', '9988', '9992', '55852'];
 const STORAGE_KEY_COLS = 'hk_stock_cols_v6';
 const STORAGE_KEY_LIST = 'hk_stock_list_v1';
 const STORAGE_KEY_INTERVAL = 'hk_stock_interval_v1';
@@ -10,8 +10,9 @@ const dom = {};
 const indexElements = {};
 const rowCache = new Map();
 let isRefreshing = false;
+let currentFetchToken = 0;
 
-// --- NEW: State for Index Arrows ---
+// --- State for Index Arrows ---
 let indexStates = {
     hsi: { lastPrice: null, arrow: '' },
     china_index: { lastPrice: null, arrow: '' }
@@ -426,11 +427,28 @@ function formatNumber(value, formatter) {
     return formatter.format(numeric);
 }
 
+function withCacheBust(url) {
+    if (!currentFetchToken) return url;
+    if (/[?&]_=(\d+)/.test(url)) return url;
+    const sep = url.includes('?') ? '&' : '?';
+    return `${url}${sep}_=${currentFetchToken}`;
+}
+
 async function fetchWithTimeout(url, timeoutMs = 8000) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     try {
-        const response = await fetch(url, { signal: controller.signal });
+        const finalUrl = withCacheBust(url);
+        // IMPORTANT:
+        // Do NOT send custom request headers here.
+        // Adding headers like Cache-Control/Pragma triggers a CORS preflight on iOS Safari,
+        // and the on.cc endpoint may not allow OPTIONS, causing all requests to fail.
+        // We rely on cache: 'no-store' + a cache-busting query parameter instead.
+        const response = await fetch(finalUrl, {
+            signal: controller.signal,
+            cache: 'no-store',
+            credentials: 'omit'
+        });
         return response;
     } finally {
         clearTimeout(timeoutId);
@@ -446,6 +464,7 @@ function extractStockName(data) {
 async function fetchStockData(code) {
     try {
         const response = await fetchWithTimeout(`https://realtime-money18-cdn.on.cc/securityQuote/genStockDetailHKJSON.php?stockcode=${code}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         const name = extractStockName(data);
         if (!name) {
@@ -499,6 +518,7 @@ async function fetchStockData(code) {
 async function fetchIndexData(indexCode) {
     try {
         const response = await fetchWithTimeout(`https://realtime-money18-cdn.on.cc/securityQuote/genIndexDetailHKJSON.php?code=${indexCode}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         return { value: data.real.value || 'N/A', difference: data.real.difference || 'N/A' };
     } catch (error) { return { value: 'N/A', difference: 'N/A' }; }
@@ -642,6 +662,8 @@ function getRowForStock(code) {
 async function updateStockTable() {
     if (isRefreshing) return;
     isRefreshing = true;
+    currentFetchToken = Date.now();
+    const startTime = performance.now(); // START TIMER
     try {
         const tbody = dom.tbody;
         if (stockCodes.length === 0) {
@@ -793,9 +815,14 @@ async function updateStockTable() {
 
         tbody.replaceChildren(fragment);
 
-        dom.currentTime.textContent = `Last updated: ${new Date().toLocaleString()}`;
-
-        updateIndexDisplay('hsi', hsiData);
+        // END TIMER Calculation (ms)
+        const durationMs = Math.round(performance.now() - startTime);
+        
+        // Top Right: Date/Time Only (Removed duration)
+        dom.currentTime.textContent = `${new Date().toLocaleTimeString()}`;
+        
+        // Bottom Footer: Duration in ms
+updateIndexDisplay('hsi', hsiData);
         updateIndexDisplay('china_index', hsceiData);
         indexDataCache = {
             hsi: hsiData,
@@ -898,37 +925,110 @@ function loadColumnSettings() {
 
 function initResizableColumns() {
     loadColumnSettings();
+
     const table = dom.stockTable;
     const resizers = table.querySelectorAll('.resizer');
     const headers = table.querySelectorAll('th');
-    let startX, startColWidth, startTableWidth, currentHeader;
-    resizers.forEach((resizer, index) => {
-        resizer.addEventListener('mousedown', function (e) {
-            e.preventDefault();
-            currentHeader = headers[index];
-            startX = e.clientX;
-            startColWidth = currentHeader.offsetWidth;
-            startTableWidth = table.offsetWidth;
-            headers.forEach(th => { th.style.width = th.offsetWidth + 'px'; });
-            table.style.width = startTableWidth + 'px';
-            resizer.classList.add('isResizing');
-            document.addEventListener('mousemove', onMouseMove);
-            document.addEventListener('mouseup', onMouseUp);
-        });
-    });
-    function onMouseMove(e) {
-        const diffX = e.clientX - startX;
-        currentHeader.style.width = Math.max(30, startColWidth + diffX) + 'px';
+
+    let startX = 0;
+    let startColWidth = 0;
+    let startTableWidth = 0;
+    let currentHeader = null;
+
+    const MIN_COL_WIDTH = 30;
+    const supportsPointer = typeof window !== 'undefined' && 'PointerEvent' in window;
+
+    function clientXFromEvent(e) {
+        if (e.touches && e.touches[0]) return e.touches[0].clientX;
+        if (e.changedTouches && e.changedTouches[0]) return e.changedTouches[0].clientX;
+        return e.clientX;
+    }
+
+    function beginResize(e, index) {
+        // Prevent page scroll/selection while resizing (important on iPhone)
+        if (e.cancelable) e.preventDefault();
+
+        currentHeader = headers[index];
+        startX = clientXFromEvent(e);
+        startColWidth = currentHeader.offsetWidth;
+        startTableWidth = table.offsetWidth;
+
+        // Freeze widths to px so resizing is stable
+        headers.forEach(th => { th.style.width = th.offsetWidth + 'px'; });
+        table.style.width = startTableWidth + 'px';
+
+        resizers[index].classList.add('isResizing');
+    }
+
+    function doResize(e) {
+        if (!currentHeader) return;
+        const diffX = clientXFromEvent(e) - startX;
+        currentHeader.style.width = Math.max(MIN_COL_WIDTH, startColWidth + diffX) + 'px';
         table.style.width = Math.max(startTableWidth + diffX, 100) + 'px';
     }
-    function onMouseUp() {
-        const activeResizer = table.querySelector('.resizer.isResizing');
-        if (activeResizer) activeResizer.classList.remove('isResizing');
-        document.removeEventListener('mousemove', onMouseMove);
-        document.removeEventListener('mouseup', onMouseUp);
+
+    function endResize() {
+        const active = table.querySelector('.resizer.isResizing');
+        if (active) active.classList.remove('isResizing');
+        currentHeader = null;
         saveColumnSettings();
     }
+
+    resizers.forEach((resizer, index) => {
+        if (supportsPointer) {
+            resizer.addEventListener('pointerdown', (e) => {
+                if (e.pointerType === 'mouse' && e.button !== 0) return;
+
+                beginResize(e, index);
+                try { resizer.setPointerCapture(e.pointerId); } catch (_) {}
+
+                const onMove = (ev) => doResize(ev);
+                const onUp = () => {
+                    document.removeEventListener('pointermove', onMove);
+                    document.removeEventListener('pointerup', onUp);
+                    document.removeEventListener('pointercancel', onUp);
+                    endResize();
+                };
+
+                document.addEventListener('pointermove', onMove);
+                document.addEventListener('pointerup', onUp);
+                document.addEventListener('pointercancel', onUp);
+            });
+        } else {
+            // Fallback: mouse + touch
+            resizer.addEventListener('mousedown', (e) => {
+                beginResize(e, index);
+
+                const onMove = (ev) => doResize(ev);
+                const onUp = () => {
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                    endResize();
+                };
+
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+
+            resizer.addEventListener('touchstart', (e) => {
+                beginResize(e, index);
+
+                const onMove = (ev) => doResize(ev);
+                const onUp = () => {
+                    document.removeEventListener('touchmove', onMove);
+                    document.removeEventListener('touchend', onUp);
+                    document.removeEventListener('touchcancel', onUp);
+                    endResize();
+                };
+
+                document.addEventListener('touchmove', onMove, { passive: false });
+                document.addEventListener('touchend', onUp);
+                document.addEventListener('touchcancel', onUp);
+            }, { passive: false });
+        }
+    });
 }
+
 
 function initControls() {
     dom.addStockButton.addEventListener('click', addStock);
@@ -962,6 +1062,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     dom.sortButton = document.getElementById('sortButton');
     dom.addStockMessage = document.getElementById('addStockMessage');
     dom.refreshMessage = document.getElementById('refreshMessage');
+    dom.bottomTime = document.getElementById('bottomTime');
 
     indexElements.hsi = {
         valueEl: document.getElementById('hsi_value'),

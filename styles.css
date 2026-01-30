@@ -27,6 +27,12 @@ body {
 .index { font-weight: bold; }
 .timestamp { text-align: right; color: black; }
 
+/* Always add exactly one blank space in front of 恒指 / 國指 */
+#hsi-wrapper::before,
+#hscei-wrapper::before {
+    content: "\00a0";
+}
+
 table {
     border-collapse: collapse;
     font-size: 14px;
@@ -160,13 +166,43 @@ tr:nth-child(even) { background-color: #f9f9f9; }
     border: 0;
 }
 
-@media (max-width: 900px) {
+/* Mobile header layout (e.g. iPhone):
+   Row 1: " 恒指" on the left, time on the right (with a trailing space)
+   Row 2: " 國指" on the left
+*/
+@media (max-width: 700px) {
     .header {
-        justify-content: flex-start;
+        justify-content: space-between;
+        align-items: center;
     }
+
+    #hsi-wrapper {
+        order: 1;
+        flex: 1 1 auto;
+        text-align: left;
+        white-space: nowrap;
+    }
+
     .timestamp {
-        width: 100%;
+        order: 2;
+        flex: 0 0 auto;
+        margin-left: auto;
+        text-align: right;
+        white-space: nowrap;
     }
+
+    #hscei-wrapper {
+        order: 3;
+        flex: 1 1 100%;
+        text-align: left;
+        white-space: nowrap;
+    }
+
+    /* Add exactly one blank space after the time */
+    .timestamp::after {
+        content: "\00a0";
+    }
+
     .controls {
         gap: 10px;
     }

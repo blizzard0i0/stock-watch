@@ -13,9 +13,9 @@
 <body>
     <div class="container">
         <div class="header">
-            <div id="hsi-wrapper" class="index" style="padding-left: 20px;">恒指: <span id="hsi_value">-</span> <span id="hsi_change">-</span> <span id="hsi_arrow"></span></div>
-            <div id="hscei-wrapper" class="index">國指: <span id="china_index_value">-</span> <span id="china_index_change">-</span> <span id="china_index_arrow"></span></div>
-            <div class="timestamp" aria-live="polite"><span id="current_time">Last updated: Loading...</span></div>
+            <div id="hsi-wrapper" class="index">&nbsp;恒指: <span id="hsi_value">-</span> <span id="hsi_change">-</span> <span id="hsi_arrow"></span></div>
+            <div id="hscei-wrapper" class="index">&nbsp;國指: <span id="china_index_value">-</span> <span id="china_index_change">-</span> <span id="china_index_arrow"></span></div>
+            <div class="timestamp" aria-live="polite"><span id="current_time">Loading...</span></div>
         </div>
 
         <table id="stockTable">
@@ -41,7 +41,8 @@
         </table>
 
         <div style="margin-top: 10px; text-align: center; color: #666; font-style: italic;">
-            Next refresh: <span id="nextRefresh">Calculating...</span> |
+            <span id="bottomTime"></span>
+            Next: <span id="nextRefresh">Calculating...</span> |
             Status: <span id="status" aria-live="polite">Checking...</span>
         </div>
 
@@ -64,6 +65,6 @@
         </div>
     </div>
 
-    <script src="main.js" defer></script>
+    <script src="main.js?v=18" defer></script>
 </body>
 </html>
