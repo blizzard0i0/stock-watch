@@ -815,14 +815,10 @@ async function updateStockTable() {
 
         tbody.replaceChildren(fragment);
 
-        // END TIMER Calculation (ms)
-        const durationMs = Math.round(performance.now() - startTime);
-        
         // Top Right: Date/Time Only (Removed duration)
         dom.currentTime.textContent = `${new Date().toLocaleTimeString()}`;
-        
-        // Bottom Footer: Duration in ms
-updateIndexDisplay('hsi', hsiData);
+
+        updateIndexDisplay('hsi', hsiData);
         updateIndexDisplay('china_index', hsceiData);
         indexDataCache = {
             hsi: hsiData,
