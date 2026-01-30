@@ -1,4 +1,4 @@
-const DEFAULT_CODES = ['00388', '00700', '01183', '01195', '01458', '02317', '02391', '02592', '9896', '9988', '9992', '55852'];
+const DEFAULT_CODES = ['00388', '00700', '9896', '9988', '9992'];
 const STORAGE_KEY_COLS = 'hk_stock_cols_v6';
 const STORAGE_KEY_LIST = 'hk_stock_list_v1';
 const STORAGE_KEY_INTERVAL = 'hk_stock_interval_v1';
