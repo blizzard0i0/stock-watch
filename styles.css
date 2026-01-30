@@ -21,11 +21,18 @@ body {
     justify-content: space-between;
     margin-bottom: 10px;
     font-weight: bold;
+    /* Match the table text size */
+    font-size: 14px;
     flex-wrap: wrap;
     gap: 8px 12px;
 }
-.index { font-weight: bold; }
-.timestamp { text-align: right; color: black; }
+.index { font-weight: bold; font-size: 14px; }
+.timestamp { text-align: right; color: black; font-size: 14px; }
+
+/* Footer info line under the table */
+.footer-info {
+    font-size: 14px;
+}
 
 /* Always add exactly one blank space in front of 恒指 / 國指 */
 #hsi-wrapper::before,
