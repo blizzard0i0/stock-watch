@@ -24,7 +24,7 @@ let indexDataCache = {
 };
 
 let refreshTimer = null;
-let refreshRateSec = 30; // Default 30s
+let refreshRateSec = 5; // Default 5s
 let sortDirection = 'asc';
 
 const TRADE_START_HOUR = 9;
