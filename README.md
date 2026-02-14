@@ -48,4 +48,67 @@
 ---
 
 ## 專案結構
+.
+├── index.html
+├── styles.css
+├── main.js
+├── sw.js
+├── manifest.json
+├── icon-192.png
+├── icon-512.png
+└── icon.png
 
+
+---
+
+## 本機快速啟動（Local）
+
+### 方式 A：用簡單靜態伺服器（建議）
+Service Worker 通常唔支援 `file://`，建議用 HTTP server：
+
+```bash
+# Python 3
+python -m http.server 8080
+
+打開：
+
+http://localhost:8080/
+
+方式 B：VSCode Live Server
+
+安裝 “Live Server” 插件
+
+右鍵 index.html → “Open with Live Server”
+
+使用方法
+
+打開網頁
+
+新增股票代號（例如：700、388、9992）
+
+需要時調整刷新秒數
+
+用排序功能切換升序／降序
+
+表頭可以拖拉調整欄寬
+
+所有設定會儲存喺瀏覽器 localStorage，下次再開都會保留。
+
+PWA 注意事項
+
+manifest.json 同 sw.js 必須可以 直接存取（唔可以被任何登入／Access／Auth redirect 擋住），否則會導致：
+
+manifest 401/302 → 安裝失敗
+
+service worker 註冊失敗（redirect 會被瀏覽器拒絕）
+
+為避免 stale data（尤其 iOS/Safari），一般只快取 app shell（HTML/CSS/JS/icons），跨域報價 API 不會被 SW 快取。
+
+資料來源與免責聲明
+
+本專案顯示之股價與指數數據來自第三方端點，可能存在延遲或短暫不可用情況。
+本工具僅作個人／資訊用途，不構成任何投資建議。
+
+License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
