@@ -15,7 +15,11 @@
         <div class="header">
             <div id="hsi-wrapper" class="index">&nbsp;恒指: <span id="hsi_value">-</span> <span id="hsi_change">-</span> <span id="hsi_arrow"></span></div>
             <div id="hscei-wrapper" class="index">&nbsp;國指: <span id="china_index_value">-</span> <span id="china_index_change">-</span> <span id="china_index_arrow"></span></div>
-            <div class="timestamp" aria-live="polite"><span id="current_time">Loading...</span></div>
+            <div class="timestamp" aria-live="polite">
+    <button id="toggleListButton" class="btn-toggle" type="button" aria-label="Switch list to Hang Seng Index constituents">HSI</button>
+    <button id="sortModeButton" class="btn-toggle btn-sortmode" type="button" aria-label="Change sorting mode">123</button>
+    <span id="current_time">Loading...</span>
+</div>
         </div>
 
         <table id="stockTable">
@@ -65,6 +69,6 @@
         </div>
     </div>
 
-    <script src="main.js?v=18" defer></script>
+    <script src="main.js?v=20" defer></script>
 </body>
 </html>

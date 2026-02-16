@@ -1,25 +1,21 @@
 const DEFAULT_CODES = ['00388', '00700', '9992'];
+
+// --- 恒生指數成份股 (HSI) list ---
+// NOTE: 成份股會不時調整。如你要更新：
+// 1) 直接修改 DEFAULT_HSI_CODES；或
+// 2) 在同一個目錄放一個 hsi_constituents.json (內容係 ['00001','00002',...])，系統會優先讀取。
+const HSI_LIST_URL = './hsi_constituents.json';
+const STORAGE_KEY_HSI_LIST = 'hk_hsi_list_v1';
+const DEFAULT_HSI_CODES = ["00001", "00002", "00003", "00005", "00006", "00011", "00012", "00016", "00017", "00019", "00020", "00027", "00066", "00101", "00135", "00144", "00151", "00175", "00267", "00288", "00291", "00386", "00388", "00390", "00493", "00669", "00688", "00700", "00762", "00823", "00836", "00857", "00883", "00939", "00941", "00960", "00981", "00992", "01024", "01038", "01088", "01093", "01109", "01113", "01114", "01177", "01211", "01299", "01398", "01516", "01618", "01810", "01833", "01928", "01972", "01988", "02007", "02269", "02313", "02318", "02319", "02328", "02382", "02628", "02828", "03328", "03690", "03888", "03968", "03988", "06098", "06618", "06862", "09618", "09868", "09988"];
+
+let hsiCodes = [...DEFAULT_HSI_CODES];
+let listMode = 'watch'; // 'watch' | 'hsi'
+
 const STORAGE_KEY_COLS = 'hk_stock_cols_v6';
 const STORAGE_KEY_LIST = 'hk_stock_list_v1';
 const STORAGE_KEY_INTERVAL = 'hk_stock_interval_v1';
-const STORAGE_KEY_SORT = 'hk_stock_sort_v1';
-
-// UI prefs
-const STORAGE_KEY_DARK = 'hk_stock_dark_v1';
-const STORAGE_KEY_COLVIS = 'hk_stock_colvis_v1';
-const STORAGE_KEY_SEARCH = 'hk_stock_search_v1';
-
-// Last successful quote cache (per stock)
-const LAST_QUOTE_PREFIX = 'hk_stock_last_quote_v1_';
-const LAST_QUOTE_TTL_MS = 1000 * 60 * 60 * 24; // 24h
-
-// Refresh backoff
-let failureStreak = 0;
-let effectiveRefreshSec = 5;
-let pausedByVisibility = false;
-
-// Concurrency limit for fetching stocks
-const MAX_CONCURRENCY = 6;
+const STORAGE_KEY_SORT = 'hk_stock_sort_v1'; // legacy (code asc/desc)
+const STORAGE_KEY_SORT_MODE = 'hk_stock_sort_mode_v1'; // new (code / %desc / %asc)
 
 let stockCodes = [];
 let stockStates = {};
@@ -42,7 +38,11 @@ let indexDataCache = {
 
 let refreshTimer = null;
 let refreshRateSec = 5; // Default 5s
-let sortDirection = 'asc';
+// Sorting display mode:
+// - code: stock number small -> large
+// - pct_desc: % change large -> small
+// - pct_asc: % change small -> large
+let sortMode = 'code';
 
 const TRADE_START_HOUR = 9;
 const TRADE_START_MIN = 0;  // 9:00
@@ -93,20 +93,9 @@ const numberFormatters = {
     turnover: new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 };
 
-function safeJsonParse(value, fallback) {
-    if (!value) return fallback;
-    try { return JSON.parse(value); } catch (_) { return fallback; }
-}
-
-function clamp(n, min, max) {
-    return Math.max(min, Math.min(max, n));
-}
-
 function sortStocks() {
-    stockCodes.sort((a, b) => {
-        const diff = parseInt(a, 10) - parseInt(b, 10);
-        return sortDirection === 'asc' ? diff : -diff;
-    });
+    // Keep stored list in a stable, predictable order (code asc).
+    stockCodes.sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
 }
 
 function loadStockList() {
@@ -119,22 +108,89 @@ function loadStockList() {
 
 function saveStockList() { localStorage.setItem(STORAGE_KEY_LIST, JSON.stringify(stockCodes)); }
 
-function getSearchQuery() {
-    return (dom.searchInput?.value || '').trim().toLowerCase();
+async function loadHsiConstituents() {
+    // Priority:
+    // 1) Same-origin JSON file: ./hsi_constituents.json
+    // 2) localStorage cache (manual override)
+    // 3) DEFAULT_HSI_CODES
+    try {
+        const response = await fetchWithTimeout(HSI_LIST_URL, 5000);
+        if (response && response.ok) {
+            const data = await response.json();
+            if (Array.isArray(data) && data.length > 0) {
+                hsiCodes = data.map(String).map(s => s.trim()).filter(Boolean).map(code => code.padStart(5, '0'));
+                localStorage.setItem(STORAGE_KEY_HSI_LIST, JSON.stringify(hsiCodes));
+                return;
+            }
+        }
+    } catch (_) {}
+
+    const cached = localStorage.getItem(STORAGE_KEY_HSI_LIST);
+    if (cached) {
+        try {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                hsiCodes = parsed.map(String).map(s => s.trim()).filter(Boolean).map(code => code.padStart(5, '0'));
+                return;
+            }
+        } catch (_) {}
+    }
+
+    hsiCodes = [...DEFAULT_HSI_CODES];
 }
 
-function getFilteredCodes() {
-    const q = getSearchQuery();
-    if (!q) return [...stockCodes];
-    // Match code (with or without leading zeros) OR name (best-effort using last known name)
-    const normalized = q.replace(/^0+/, '');
-    return stockCodes.filter(code => {
-        const plain = code.replace(/^0+/, '');
-        if (plain.includes(normalized) || code.includes(q)) return true;
-        const cached = loadLastQuote(code);
-        const name = cached?.payload?.name ? String(cached.payload.name).toLowerCase() : '';
-        return name.includes(q);
+function isHsiMode() {
+    return listMode === 'hsi';
+}
+
+function updateToggleButtonUI() {
+    if (!dom.toggleListButton) return;
+    if (isHsiMode()) {
+        dom.toggleListButton.classList.add('active');
+        dom.toggleListButton.textContent = 'WL';
+        dom.toggleListButton.setAttribute('aria-label', 'Switch list back to watch list');
+        dom.toggleListButton.title = 'Back to Watchlist';
+    } else {
+        dom.toggleListButton.classList.remove('active');
+        dom.toggleListButton.textContent = 'HSI';
+        dom.toggleListButton.setAttribute('aria-label', 'Switch list to Hang Seng Index constituents');
+        dom.toggleListButton.title = 'Switch to HSI constituents';
+    }
+}
+
+function setControlsEnabled(enabled) {
+    // Disable watchlist editing controls while viewing HSI constituents
+    const toToggle = [
+        dom.addStockButton,
+        dom.newStockInput,
+        dom.resetButton
+    ];
+    toToggle.forEach(el => {
+        if (!el) return;
+        el.disabled = !enabled;
     });
+}
+
+function switchToHsiList() {
+    listMode = 'hsi';
+    stockCodes = [...hsiCodes];
+    sortStocks();
+    updateToggleButtonUI();
+    setControlsEnabled(false);
+    updateStockTable();
+}
+
+function switchToWatchList() {
+    listMode = 'watch';
+    loadStockList(); // Restore from localStorage
+    updateToggleButtonUI();
+    setControlsEnabled(true);
+    updateStockTable();
+}
+
+function toggleListMode() {
+    if (isHsiMode()) switchToWatchList();
+    else switchToHsiList();
 }
 
 function loadRefreshInterval() {
@@ -144,27 +200,78 @@ function loadRefreshInterval() {
         if (!isNaN(val) && val >= 3) refreshRateSec = val;
     }
     dom.refreshInput.value = refreshRateSec;
-    effectiveRefreshSec = refreshRateSec;
 }
 
-function loadSortDirection() {
-    const stored = localStorage.getItem(STORAGE_KEY_SORT);
-    if (stored === 'asc' || stored === 'desc') sortDirection = stored;
-    updateSortButtonLabel();
+function loadSortMode() {
+    // Migrate: if legacy key existed, ignore it and default to 'code'
+    const stored = localStorage.getItem(STORAGE_KEY_SORT_MODE);
+    if (stored === 'code' || stored === 'pct_desc' || stored === 'pct_asc') {
+        sortMode = stored;
+    }
+    updateSortModeButtons();
 }
 
-function setSortDirection(nextDirection) {
-    sortDirection = nextDirection;
-    localStorage.setItem(STORAGE_KEY_SORT, sortDirection);
-    updateSortButtonLabel();
-    sortStocks();
+function setSortMode(nextMode) {
+    sortMode = nextMode;
+    localStorage.setItem(STORAGE_KEY_SORT_MODE, sortMode);
+    updateSortModeButtons();
     updateStockTable();
 }
 
-function updateSortButtonLabel() {
-    if (dom.sortButton) {
-        dom.sortButton.textContent = `Sort: ${sortDirection === 'asc' ? 'Asc' : 'Desc'}`;
+function cycleSortMode() {
+    const next = sortMode === 'code'
+        ? 'pct_desc'
+        : (sortMode === 'pct_desc' ? 'pct_asc' : 'code');
+    setSortMode(next);
+}
+
+function sortModeLabelShort() {
+    if (sortMode === 'pct_desc') return '%↓';
+    if (sortMode === 'pct_asc') return '%↑';
+    return '123';
+}
+
+function sortModeLabelLong() {
+    if (sortMode === 'pct_desc') return 'Sort: % High→Low';
+    if (sortMode === 'pct_asc') return 'Sort: % Low→High';
+    return 'Sort: Code';
+}
+
+function updateSortModeButtons() {
+    if (dom.sortModeButton) {
+        dom.sortModeButton.textContent = sortModeLabelShort();
+        dom.sortModeButton.title = sortModeLabelLong();
     }
+    if (dom.sortButton) {
+        dom.sortButton.textContent = sortModeLabelLong();
+    }
+}
+
+function getSortedStockData(stockData) {
+    const normalizePct = (s) => {
+        const v = parseFloat(s.pctChange);
+        return Number.isFinite(v) ? v : null;
+    };
+
+    const sorted = [...stockData];
+    if (sortMode === 'code') {
+        sorted.sort((a, b) => parseInt(a.code, 10) - parseInt(b.code, 10));
+        return sorted;
+    }
+
+    const dir = sortMode === 'pct_desc' ? -1 : 1; // -1 => desc, +1 => asc
+    sorted.sort((a, b) => {
+        const pa = normalizePct(a);
+        const pb = normalizePct(b);
+        const aBad = pa === null;
+        const bBad = pb === null;
+        if (aBad && bBad) return parseInt(a.code, 10) - parseInt(b.code, 10);
+        if (aBad) return 1;  // N/A always at bottom
+        if (bBad) return -1;
+        if (pa === pb) return parseInt(a.code, 10) - parseInt(b.code, 10);
+        return (pa - pb) * dir;
+    });
+    return sorted;
 }
 
 function setRefreshInterval() {
@@ -176,8 +283,6 @@ function setRefreshInterval() {
         return;
     }
     refreshRateSec = val;
-    failureStreak = 0;
-    effectiveRefreshSec = refreshRateSec;
     localStorage.setItem(STORAGE_KEY_INTERVAL, refreshRateSec);
     showInputMessage(dom.refreshMessage, 'Refresh updated.', true);
     scheduleNextRefresh();
@@ -234,12 +339,11 @@ function setHolidayStateFromCache(cache, source) {
 function getFallbackHolidayPayload(year) {
     const fallbackDates = FALLBACK_HK_HOLIDAYS_BY_YEAR[year];
     if (!fallbackDates || fallbackDates.length === 0) return null;
-    const next = FALLBACK_HK_HOLIDAYS_BY_YEAR[year + 1] || [];
     return {
         updatedAt: Date.now(),
         data: {
             [year]: fallbackDates,
-            [year + 1]: next
+            [year + 1]: []
         }
     };
 }
@@ -352,15 +456,6 @@ function scheduleNextRefresh() {
     const statusEl = dom.status;
     const nextRefreshEl = dom.nextRefresh;
     const now = new Date();
-
-    if (document.hidden) {
-        pausedByVisibility = true;
-        statusEl.textContent = 'Paused (tab hidden)';
-        statusEl.style.color = '#cc6600';
-        nextRefreshEl.textContent = '—';
-        return;
-    }
-    pausedByVisibility = false;
     const marketStatus = getMarketStatus(now);
 
     if (marketStatus.state === 'open') {
@@ -371,11 +466,11 @@ function scheduleNextRefresh() {
             statusEl.textContent = 'Active (Mon-Fri 9:00-12:00, 13:00-16:10)';
             statusEl.style.color = '#006600';
         }
-        const nextTime = new Date(now.getTime() + (effectiveRefreshSec * 1000));
+        const nextTime = new Date(now.getTime() + (refreshRateSec * 1000));
         nextRefreshEl.textContent = nextTime.toLocaleTimeString();
         refreshTimer = setTimeout(() => {
             updateStockTable().then(() => { scheduleNextRefresh(); });
-        }, effectiveRefreshSec * 1000);
+        }, refreshRateSec * 1000);
         return;
     }
 
@@ -420,6 +515,7 @@ function showInputMessage(target, message, isSuccess = false) {
 }
 
 async function addStock() {
+    if (isHsiMode()) { showInputMessage(dom.addStockMessage, 'HSI list is view-only.'); return; }
     const input = dom.newStockInput;
     let code = input.value.trim();
     if (!code) return;
@@ -463,12 +559,14 @@ async function addStock() {
 }
 
 function removeStock(code) {
+    if (isHsiMode()) return;
     stockCodes = stockCodes.filter(c => c !== code);
     saveStockList();
     updateStockTable();
 }
 
 function resetDefaults() {
+    if (isHsiMode()) return;
     if (confirm('Reset to original stock list?')) {
         stockCodes = [...DEFAULT_CODES];
         sortStocks();
@@ -518,40 +616,6 @@ function extractStockName(data) {
     return String(rawName).trim();
 }
 
-function saveLastQuote(code, payload) {
-    try {
-        const stored = { ts: Date.now(), payload };
-        localStorage.setItem(LAST_QUOTE_PREFIX + code, JSON.stringify(stored));
-    } catch (_) {}
-}
-
-function loadLastQuote(code) {
-    const raw = localStorage.getItem(LAST_QUOTE_PREFIX + code);
-    const parsed = safeJsonParse(raw, null);
-    if (!parsed || !parsed.ts || !parsed.payload) return null;
-    if ((Date.now() - parsed.ts) > LAST_QUOTE_TTL_MS) return null;
-    return parsed;
-}
-
-async function mapWithConcurrency(items, limit, mapper) {
-    const results = new Array(items.length);
-    let nextIndex = 0;
-
-    async function worker() {
-        while (true) {
-            const i = nextIndex++;
-            if (i >= items.length) return;
-            results[i] = await mapper(items[i], i);
-        }
-    }
-
-    const workers = [];
-    const workerCount = clamp(limit, 1, 16);
-    for (let i = 0; i < workerCount; i++) workers.push(worker());
-    await Promise.all(workers);
-    return results;
-}
-
 async function fetchStockData(code) {
     try {
         const response = await fetchWithTimeout(`https://realtime-money18-cdn.on.cc/securityQuote/genStockDetailHKJSON.php?stockcode=${code}`);
@@ -572,7 +636,7 @@ async function fetchStockData(code) {
             dayDirection = currentPrice > prevClose ? 'up' : currentPrice < prevClose ? 'down' : 'none';
         }
 
-        const payload = {
+        return {
             code: code,
             name: name,
             quote: currentPrice !== 'N/A' ? currentPrice : 'N/A',
@@ -584,24 +648,10 @@ async function fetchStockData(code) {
             low: data.real.dyl || 'N/A',
             turnover: (parseInt(data.real.tvr, 10) / 1000000).toFixed(2) || 'N/A',
             dayDirection: dayDirection,
-            error: false,
-            stale: false
+            error: false
         };
-        saveLastQuote(code, payload);
-        return payload;
     } catch (error) {
         const isInvalid = error instanceof Error && error.message === 'Invalid stock code';
-        if (!isInvalid) {
-            const cached = loadLastQuote(code);
-            if (cached && cached.payload) {
-                return {
-                    ...cached.payload,
-                    stale: true,
-                    staleAgeMs: Date.now() - cached.ts,
-                    error: false
-                };
-            }
-        }
         return {
             code,
             name: isInvalid ? 'INVALID' : 'ERROR',
@@ -615,7 +665,6 @@ async function fetchStockData(code) {
             turnover: 'N/A',
             dayDirection: 'none',
             error: true,
-            stale: false,
             errorMessage: isInvalid ? 'Invalid stock code.' : 'Data unavailable. Retrying on next refresh.'
         };
     }
@@ -714,7 +763,6 @@ function getRowForStock(code) {
         text: '✕',
         onClick: () => removeStock(code)
     });
-    deleteButton.setAttribute('aria-label', `Remove stock ${code.replace(/^0+/, '')}`);
     const dayRangeIndicator = createArrowSpan('', '');
     const tickIndicator = createArrowSpan('', '');
     const quoteText = document.createTextNode('');
@@ -778,26 +826,18 @@ async function updateStockTable() {
             rowCache.clear();
             return;
         }
-
-        const visibleCodes = getFilteredCodes();
-        const q = getSearchQuery();
-        if (dom.searchHint) {
-            dom.searchHint.textContent = q ? `Showing ${visibleCodes.length}/${stockCodes.length}` : '';
-        }
-
         if (tbody.children.length === 0) tbody.innerHTML = '<tr><td colspan="12">Loading data...</td></tr>';
 
-        // Fetch only visible codes (search filter), with a concurrency limit.
-        const stockPromises = mapWithConcurrency(visibleCodes, MAX_CONCURRENCY, (code) => fetchStockData(code));
+        const stockPromises = stockCodes.map(code => fetchStockData(code));
         const [stockSettled, hsiSettled, hsceiSettled] = await Promise.allSettled([
-            stockPromises,
+            Promise.all(stockPromises),
             fetchIndexData('HSI'),
             fetchIndexData('HSCEI')
         ]);
 
         const stockData = stockSettled.status === 'fulfilled'
             ? stockSettled.value
-            : visibleCodes.map(code => ({
+            : stockCodes.map(code => ({
                 code,
                 name: 'ERROR',
                 quote: 'N/A',
@@ -810,7 +850,6 @@ async function updateStockTable() {
                 turnover: 'N/A',
                 dayDirection: 'none',
                 error: true,
-                stale: false,
                 errorMessage: 'Data unavailable. Retrying on next refresh.'
             }));
 
@@ -820,8 +859,9 @@ async function updateStockTable() {
         const fragment = document.createDocumentFragment();
         const seenCodes = new Set();
 
-        let hardFailures = 0;
-        stockData.forEach(stock => {
+        const displayData = getSortedStockData(stockData);
+
+        displayData.forEach(stock => {
             seenCodes.add(stock.code);
             const {
                 row,
@@ -830,7 +870,8 @@ async function updateStockTable() {
                 nameLink,
                 dayRangeIndicator,
                 tickIndicator,
-                quoteText
+                quoteText,
+                deleteButton
             } = getRowForStock(stock.code);
             const pctValue = parseFloat(stock.pctChange);
             const priceVal = parseFloat(stock.quote);
@@ -840,12 +881,8 @@ async function updateStockTable() {
 
             row.className = (!isNaN(pctValue) && (pctValue > 10 || pctValue < -10)) ? 'highlight' : '';
             row.classList.remove('row-error');
-            row.classList.remove('row-stale');
             if (stock.error) row.classList.add('row-error');
-            if (stock.stale) row.classList.add('row-stale');
             row.title = stock.error ? (stock.errorMessage || 'Data unavailable.') : '';
-
-            if (stock.error) hardFailures += 1;
 
             // --- 2. Color Logic for Columns 1-5 ---
             let fontClass = '';
@@ -884,6 +921,12 @@ async function updateStockTable() {
             const linkUrlQuote = `https://www.aastocks.com/tc/stocks/quote/detail-quote.aspx?symbol=${stock.code}`;
             const linkUrlTransaction = `http://www.etnet.com.hk/www/tc/stocks/realtime/quote_transaction.php?code=${displayCode}`;
 
+            // Disable delete button in HSI mode (view-only)
+            if (deleteButton) {
+                deleteButton.disabled = isHsiMode();
+                deleteButton.style.visibility = isHsiMode() ? 'hidden' : 'visible';
+            }
+
             cells.no.className = `stock-no ${fontClass}`.trim();
             noLink.href = linkUrlQuote;
             noLink.textContent = displayCode;
@@ -891,16 +934,6 @@ async function updateStockTable() {
             cells.name.className = `stock-name ${fontClass}`.trim();
             nameLink.href = linkUrlTransaction;
             nameLink.textContent = stock.name;
-            // Stale badge
-            const existingBadge = cells.name.querySelector('.stale-badge');
-            if (existingBadge) existingBadge.remove();
-            if (stock.stale) {
-                const badge = document.createElement('span');
-                badge.className = 'stale-badge';
-                badge.textContent = 'stale';
-                badge.title = 'Showing last successful data (network issue)';
-                cells.name.appendChild(badge);
-            }
 
             cells.quote.className = `rt-quote ${fontClass} ${bgTickClass}`.trim();
             if (dayRangeArrow) {
@@ -939,15 +972,6 @@ async function updateStockTable() {
 
             fragment.appendChild(row);
         });
-
-        // Backoff: if we had hard failures, slow down refresh for a bit.
-        if (hardFailures > 0) {
-            failureStreak = clamp(failureStreak + 1, 0, 6);
-        } else {
-            failureStreak = 0;
-        }
-        const multiplier = failureStreak === 0 ? 1 : Math.pow(2, failureStreak - 1);
-        effectiveRefreshSec = clamp(refreshRateSec * multiplier, refreshRateSec, 300);
 
         rowCache.forEach((_value, code) => {
             if (!seenCodes.has(code)) rowCache.delete(code);
@@ -1168,12 +1192,11 @@ function initResizableColumns() {
 
 function initControls() {
     dom.addStockButton.addEventListener('click', addStock);
+    if (dom.toggleListButton) dom.toggleListButton.addEventListener('click', toggleListMode);
+    if (dom.sortModeButton) dom.sortModeButton.addEventListener('click', cycleSortMode);
     dom.setRefreshButton.addEventListener('click', setRefreshInterval);
     dom.resetButton.addEventListener('click', resetDefaults);
-    dom.sortButton.addEventListener('click', () => {
-        const nextDirection = sortDirection === 'asc' ? 'desc' : 'asc';
-        setSortDirection(nextDirection);
-    });
+    dom.sortButton.addEventListener('click', cycleSortMode);
 
     dom.newStockInput.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') addStock();
@@ -1181,148 +1204,6 @@ function initControls() {
 
     dom.refreshInput.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') setRefreshInterval();
-    });
-
-    // Search (filter)
-    let searchTimer = null;
-    if (dom.searchInput) {
-        dom.searchInput.addEventListener('input', () => {
-            try { localStorage.setItem(STORAGE_KEY_SEARCH, dom.searchInput.value || ''); } catch (_) {}
-            if (searchTimer) clearTimeout(searchTimer);
-            searchTimer = setTimeout(() => {
-                updateStockTable();
-            }, 180);
-        });
-        dom.searchInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                dom.searchInput.value = '';
-                try { localStorage.setItem(STORAGE_KEY_SEARCH, ''); } catch (_) {}
-                updateStockTable();
-            }
-        });
-    }
-
-    // Dark mode toggle
-    if (dom.darkToggle) {
-        dom.darkToggle.addEventListener('click', () => {
-            const next = !document.body.classList.contains('dark');
-            applyDarkMode(next);
-            localStorage.setItem(STORAGE_KEY_DARK, next ? '1' : '0');
-        });
-    }
-}
-
-function applyDarkMode(isDark) {
-    document.body.classList.toggle('dark', !!isDark);
-    if (dom.darkToggle) {
-        dom.darkToggle.setAttribute('aria-pressed', isDark ? 'true' : 'false');
-        dom.darkToggle.textContent = isDark ? 'Light' : 'Dark';
-    }
-}
-
-function loadDarkModePref() {
-    const stored = localStorage.getItem(STORAGE_KEY_DARK);
-    if (stored === '1') return true;
-    if (stored === '0') return false;
-    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-}
-
-function applyColumnVisibility(state) {
-    const table = dom.stockTable;
-    if (!table) return;
-    const keys = ['preclose', 'open', 'high', 'low', 'turnover'];
-    keys.forEach(k => table.classList.toggle(`hide-col-${k}`, state && state[k] === false));
-}
-
-function loadColumnVisibility() {
-    return safeJsonParse(localStorage.getItem(STORAGE_KEY_COLVIS), null);
-}
-
-function saveColumnVisibility(state) {
-    try { localStorage.setItem(STORAGE_KEY_COLVIS, JSON.stringify(state)); } catch (_) {}
-}
-
-function initColumnsMenu() {
-    const menu = dom.columnsMenu;
-    const btn = dom.columnsButton;
-    if (!menu || !btn) return;
-
-    const defaultState = { preclose: true, open: true, high: true, low: true, turnover: true };
-    const state = { ...defaultState, ...(loadColumnVisibility() || {}) };
-
-    function render() {
-        menu.innerHTML = '';
-        const items = [
-            { key: 'preclose', label: 'PreCls' },
-            { key: 'open', label: 'Open' },
-            { key: 'high', label: 'High' },
-            { key: 'low', label: 'Low' },
-            { key: 'turnover', label: 'Turnover' }
-        ];
-        items.forEach(({ key, label }) => {
-            const row = document.createElement('div');
-            row.className = 'menu-item';
-            const id = `col_${key}`;
-            const labelEl = document.createElement('label');
-            labelEl.setAttribute('for', id);
-            labelEl.textContent = label;
-            const input = document.createElement('input');
-            input.type = 'checkbox';
-            input.id = id;
-            input.checked = !!state[key];
-            input.addEventListener('change', () => {
-                state[key] = input.checked;
-                saveColumnVisibility(state);
-                applyColumnVisibility(state);
-            });
-            row.append(labelEl, input);
-            menu.appendChild(row);
-        });
-        applyColumnVisibility(state);
-    }
-
-    function closeMenu() {
-        menu.hidden = true;
-        btn.setAttribute('aria-expanded', 'false');
-    }
-
-    btn.addEventListener('click', () => {
-        const next = !menu.hidden;
-        menu.hidden = next;
-        btn.setAttribute('aria-expanded', next ? 'false' : 'true');
-        if (!next) render();
-    });
-
-    document.addEventListener('click', (e) => {
-        if (!menu.hidden && !menu.contains(e.target) && e.target !== btn) closeMenu();
-    });
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') closeMenu();
-    });
-
-    // First render
-    render();
-}
-
-function initVisibilityPause() {
-    document.addEventListener('visibilitychange', () => {
-        if (document.hidden) {
-            if (refreshTimer) clearTimeout(refreshTimer);
-            pausedByVisibility = true;
-            if (dom.status) {
-                dom.status.textContent = 'Paused (tab hidden)';
-                dom.status.style.color = '#cc6600';
-            }
-            if (dom.nextRefresh) dom.nextRefresh.textContent = '—';
-        } else {
-            if (pausedByVisibility) {
-                pausedByVisibility = false;
-                // Refresh once when user comes back.
-                updateStockTable().then(() => scheduleNextRefresh());
-            } else {
-                scheduleNextRefresh();
-            }
-        }
     });
 }
 
@@ -1341,14 +1222,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     dom.addStockMessage = document.getElementById('addStockMessage');
     dom.refreshMessage = document.getElementById('refreshMessage');
     dom.bottomTime = document.getElementById('bottomTime');
-    dom.searchInput = document.getElementById('searchInput');
-    dom.searchHint = document.getElementById('searchHint');
-    dom.columnsButton = document.getElementById('columnsButton');
-    dom.columnsMenu = document.getElementById('columnsMenu');
-    dom.darkToggle = document.getElementById('darkToggle');
-
-    // Mobile: start with auto hide heavy columns (user can enable via menu)
-    dom.stockTable.classList.add('auto-mobile-hide');
+    dom.toggleListButton = document.getElementById('toggleListButton');
+    dom.sortModeButton = document.getElementById('sortModeButton');
 
     indexElements.hsi = {
         valueEl: document.getElementById('hsi_value'),
@@ -1363,19 +1238,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         wrapperEl: document.getElementById('hscei-wrapper')
     };
     loadRefreshInterval();
-    loadSortDirection();
+    loadSortMode();
     loadStockList();
-
-    // UI prefs
-    const storedSearch = localStorage.getItem(STORAGE_KEY_SEARCH);
-    if (dom.searchInput && storedSearch) dom.searchInput.value = storedSearch;
-    applyDarkMode(loadDarkModePref());
-
     await loadHolidayCalendar();
+    await loadHsiConstituents();
+    updateToggleButtonUI();
+    setControlsEnabled(true);
     initResizableColumns();
     initControls();
-    initColumnsMenu();
-    initVisibilityPause();
 
     // Initial data load, then start smart schedule
     updateStockTable().then(() => {

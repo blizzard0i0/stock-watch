@@ -27,7 +27,18 @@ body {
     gap: 8px 12px;
 }
 .index { font-weight: bold; font-size: 14px; }
-.timestamp { text-align: right; color: black; font-size: 14px; }
+.timestamp { text-align: right; color: black; font-size: 14px; display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+
+/* Header toggle button: Watchlist <-> 恒生指數成份股 */
+.btn-toggle { background: #ffffff; border: 1px solid #ccc; color: #007bff; font-weight: 700; padding: 4px 10px; border-radius: 999px; font-size: 12px; line-height: 1; cursor: pointer; }
+.btn-toggle:hover { border-color: #007bff; }
+.btn-toggle:active { transform: translateY(1px); }
+.btn-toggle.active { background: #007bff; color: #ffffff; border-color: #007bff; }
+.btn-toggle:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Top-right sort mode button */
+.btn-sortmode { margin-left: 6px; min-width: 44px; text-align: center; }
+
 
 /* Footer info line under the table */
 .footer-info {
