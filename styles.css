@@ -29,6 +29,19 @@ body {
 .index { font-weight: bold; font-size: 14px; }
 .timestamp { text-align: right; color: black; font-size: 14px; display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
 
+/* Data source health indicator (top-right dot) */
+.health-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    display: inline-block;
+    border: 1px solid rgba(0,0,0,0.2);
+}
+.health-loading { background: #bbb; }
+.health-good { background: #19a64a; }
+.health-warn { background: #f0ad4e; }
+.health-bad { background: #d9534f; }
+
 /* Header toggle button: Watchlist <-> 恒生指數成份股 */
 .btn-toggle { background: #ffffff; border: 1px solid #ccc; color: #007bff; font-weight: 700; padding: 4px 10px; border-radius: 999px; font-size: 12px; line-height: 1; cursor: pointer; }
 .btn-toggle:hover { border-color: #007bff; }

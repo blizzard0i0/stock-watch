@@ -57,6 +57,13 @@ const rowCache = new Map();
 let isRefreshing = false;
 let currentFetchToken = 0;
 
+// Visibility pause state (save battery + avoid useless requests)
+let pausedByVisibility = false;
+
+// Rolling data-source health (based on last few refresh cycles)
+const healthHistory = [];
+const HEALTH_WINDOW_MS = 1000 * 60 * 2; // 2 minutes
+
 // --- State for Index Arrows ---
 let indexStates = {
     hsi: { lastPrice: null, arrow: '' },
@@ -504,6 +511,15 @@ function scheduleNextRefresh() {
     const myToken = ++schedulerToken;
     const statusEl = dom.status;
     const nextRefreshEl = dom.nextRefresh;
+
+    if (pausedByVisibility) {
+        statusEl.textContent = 'Paused (tab hidden)';
+        statusEl.style.color = '#666';
+        nextRefreshEl.textContent = 'Paused';
+        updateHealthUI();
+        return;
+    }
+
     const now = new Date();
     const marketStatus = getMarketStatus(now);
 
@@ -542,6 +558,7 @@ function scheduleNextRefresh() {
         const delayMs = Math.min(Math.max(0, effectiveTargetMs - nowMs), maxTimeout);
         refreshTimer = setTimeout(() => {
             if (myToken !== schedulerToken) return;
+            if (pausedByVisibility) { scheduleNextRefresh(); return; }
             updateStockTable().finally(() => {
                 if (myToken !== schedulerToken) return;
                 scheduleNextRefresh();
@@ -842,6 +859,102 @@ function createTrendIndicator(direction) {
     return wrapper;
 }
 
+// --------------------
+// DOM diff helpers (avoid unnecessary repaint on mobile)
+// --------------------
+function setTextIfChanged(node, text) {
+    const next = text === undefined || text === null ? '' : String(text);
+    if (node.textContent !== next) node.textContent = next;
+}
+
+function setNodeValueIfChanged(textNode, text) {
+    const next = text === undefined || text === null ? '' : String(text);
+    if (textNode.nodeValue !== next) textNode.nodeValue = next;
+}
+
+function setClassIfChanged(el, className) {
+    const next = className || '';
+    if (el.className !== next) el.className = next;
+}
+
+function setHrefIfChanged(link, href) {
+    if (link.getAttribute('href') !== href) link.setAttribute('href', href);
+}
+
+function setTitleIfChanged(el, title) {
+    const next = title || '';
+    if ((el.getAttribute('title') || '') !== next) el.setAttribute('title', next);
+}
+
+function setHiddenIfChanged(el, hidden) {
+    const next = !!hidden;
+    if (el.hidden !== next) el.hidden = next;
+}
+
+function setDisabledIfChanged(el, disabled) {
+    const next = !!disabled;
+    if (el.disabled !== next) el.disabled = next;
+}
+
+function setVisibilityIfChanged(el, visibility) {
+    if ((el.style.visibility || '') !== visibility) el.style.visibility = visibility;
+}
+
+// --------------------
+// Data source health indicator
+// --------------------
+function recordHealthSample(ok, total, durationMs) {
+    const now = Date.now();
+    healthHistory.push({ ok, total, durationMs, ts: now });
+    // Trim old
+    while (healthHistory.length && (now - healthHistory[0].ts) > HEALTH_WINDOW_MS) {
+        healthHistory.shift();
+    }
+}
+
+function computeHealth() {
+    if (healthHistory.length === 0) return { ratio: null, ok: 0, total: 0, avgMs: null };
+    let ok = 0;
+    let total = 0;
+    let msSum = 0;
+    healthHistory.forEach(s => {
+        ok += s.ok;
+        total += s.total;
+        msSum += (s.durationMs || 0);
+    });
+    const ratio = total > 0 ? ok / total : null;
+    const avgMs = healthHistory.length ? (msSum / healthHistory.length) : null;
+    return { ratio, ok, total, avgMs };
+}
+
+function updateHealthUI() {
+    if (!dom.sourceHealth) return;
+    const { ratio, ok, total, avgMs } = computeHealth();
+
+    dom.sourceHealth.classList.remove('health-loading', 'health-good', 'health-warn', 'health-bad');
+
+    if (pausedByVisibility) {
+        dom.sourceHealth.classList.add('health-loading');
+        dom.sourceHealth.title = 'Data source health: paused (tab hidden)';
+        return;
+    }
+
+    if (ratio === null) {
+        dom.sourceHealth.classList.add('health-loading');
+        dom.sourceHealth.title = 'Data source health: checking...';
+        return;
+    }
+
+    // Thresholds: good >= 0.9, warn >= 0.6, else bad
+    if (ratio >= 0.9) dom.sourceHealth.classList.add('health-good');
+    else if (ratio >= 0.6) dom.sourceHealth.classList.add('health-warn');
+    else dom.sourceHealth.classList.add('health-bad');
+
+    const pct = Math.round(ratio * 100);
+    const avgStr = avgMs ? `${Math.round(avgMs)}ms` : 'N/A';
+    dom.sourceHealth.title = `Data source health: ${pct}% (${ok}/${total}), avg ${avgStr}`;
+}
+
 function getRowForStock(code) {
     if (rowCache.has(code)) return rowCache.get(code);
 
@@ -926,6 +1039,7 @@ async function fetchStockDataForVisibleList(codes) {
 
 async function updateStockTable() {
     if (isRefreshing) return;
+    if (pausedByVisibility) return;
     isRefreshing = true;
     currentFetchToken = Date.now();
     const startTime = performance.now(); // START TIMER
@@ -966,6 +1080,14 @@ async function updateStockTable() {
         const hsiData = hsiSettled.status === 'fulfilled' ? hsiSettled.value : indexDataCache.hsi;
         const hsceiData = hsceiSettled.status === 'fulfilled' ? hsceiSettled.value : indexDataCache.china_index;
 
+        // Update data-source health (rolling window)
+        const okStocks = stockData.reduce((acc, s) => acc + (!s.error ? 1 : 0), 0);
+        const totalStocks = stockData.length;
+        const okIndex = (hsiData?.value && hsiData.value !== 'N/A' ? 1 : 0) + (hsceiData?.value && hsceiData.value !== 'N/A' ? 1 : 0);
+        const total = totalStocks + 2;
+        const ok = okStocks + okIndex;
+        recordHealthSample(ok, total, performance.now() - startTime);
+
         const fragment = document.createDocumentFragment();
         const seenCodes = new Set();
 
@@ -989,10 +1111,11 @@ async function updateStockTable() {
             const highVal = parseFloat(stock.high);
             const lowVal = parseFloat(stock.low);
 
-            row.className = (!isNaN(pctValue) && (pctValue > 10 || pctValue < -10)) ? 'highlight' : '';
-            row.classList.remove('row-error');
-            if (stock.error) row.classList.add('row-error');
-            row.title = stock.error ? (stock.errorMessage || 'Data unavailable.') : '';
+            // Row-level class/title diff
+            const baseRowClass = (!isNaN(pctValue) && (pctValue > 10 || pctValue < -10)) ? 'highlight' : '';
+            const rowClass = stock.error ? `${baseRowClass} row-error`.trim() : baseRowClass;
+            setClassIfChanged(row, rowClass);
+            setTitleIfChanged(row, stock.error ? (stock.errorMessage || 'Data unavailable.') : '');
 
             // --- 2. Color Logic for Columns 1-5 ---
             let fontClass = '';
@@ -1033,52 +1156,53 @@ async function updateStockTable() {
 
             // Disable delete button in HSI mode (view-only)
             if (deleteButton) {
-                deleteButton.disabled = isHsiMode();
-                deleteButton.style.visibility = isHsiMode() ? 'hidden' : 'visible';
+                const isViewOnly = isHsiMode();
+                setDisabledIfChanged(deleteButton, isViewOnly);
+                setVisibilityIfChanged(deleteButton, isViewOnly ? 'hidden' : 'visible');
             }
 
-            cells.no.className = `stock-no ${fontClass}`.trim();
-            noLink.href = linkUrlQuote;
-            noLink.textContent = displayCode;
+            setClassIfChanged(cells.no, `stock-no ${fontClass}`.trim());
+            setHrefIfChanged(noLink, linkUrlQuote);
+            setTextIfChanged(noLink, displayCode);
 
-            cells.name.className = `stock-name ${fontClass}`.trim();
-            nameLink.href = linkUrlTransaction;
-            nameLink.textContent = stock.name;
+            setClassIfChanged(cells.name, `stock-name ${fontClass}`.trim());
+            setHrefIfChanged(nameLink, linkUrlTransaction);
+            setTextIfChanged(nameLink, stock.name);
 
-            cells.quote.className = `rt-quote ${fontClass} ${bgTickClass}`.trim();
+            setClassIfChanged(cells.quote, `rt-quote ${fontClass} ${bgTickClass}`.trim());
             if (dayRangeArrow) {
-                dayRangeIndicator.arrowSpan.textContent = dayRangeArrow;
-                dayRangeIndicator.arrowSpan.className = dayRangeArrow === '↑' ? 'arrow-up' : 'arrow-down';
-                dayRangeIndicator.srText.textContent = dayRangeArrow === '↑' ? 'Day high' : 'Day low';
-                dayRangeIndicator.wrapper.hidden = false;
+                setTextIfChanged(dayRangeIndicator.arrowSpan, dayRangeArrow);
+                setClassIfChanged(dayRangeIndicator.arrowSpan, dayRangeArrow === '↑' ? 'arrow-up' : 'arrow-down');
+                setTextIfChanged(dayRangeIndicator.srText, dayRangeArrow === '↑' ? 'Day high' : 'Day low');
+                setHiddenIfChanged(dayRangeIndicator.wrapper, false);
             } else {
-                dayRangeIndicator.wrapper.hidden = true;
+                setHiddenIfChanged(dayRangeIndicator.wrapper, true);
             }
             if (arrowSymbol) {
-                tickIndicator.arrowSpan.textContent = arrowSymbol;
-                tickIndicator.arrowSpan.className = arrowClass;
-                tickIndicator.srText.textContent = arrowSymbol === '↑' ? 'Tick up' : 'Tick down';
-                tickIndicator.wrapper.hidden = false;
+                setTextIfChanged(tickIndicator.arrowSpan, arrowSymbol);
+                setClassIfChanged(tickIndicator.arrowSpan, arrowClass);
+                setTextIfChanged(tickIndicator.srText, arrowSymbol === '↑' ? 'Tick up' : 'Tick down');
+                setHiddenIfChanged(tickIndicator.wrapper, false);
             } else {
-                tickIndicator.wrapper.hidden = true;
+                setHiddenIfChanged(tickIndicator.wrapper, true);
             }
             const formattedQuote = formatNumber(stock.quote, numberFormatters.price);
             const hasIndicators = !dayRangeIndicator.wrapper.hidden || !tickIndicator.wrapper.hidden;
-            quoteText.textContent = `${hasIndicators ? ' ' : ''}${formattedQuote}`;
+            setNodeValueIfChanged(quoteText, `${hasIndicators ? ' ' : ''}${formattedQuote}`);
 
-            cells.change.className = fontClass;
-            cells.change.textContent = formatNumber(stock.change, numberFormatters.price);
+            setClassIfChanged(cells.change, fontClass);
+            setTextIfChanged(cells.change, formatNumber(stock.change, numberFormatters.price));
 
-            cells.pct.className = fontClass;
+            setClassIfChanged(cells.pct, fontClass);
             const pctText = stock.pctChange === 'N/A'
                 ? 'N/A'
                 : `${formatNumber(stock.pctChange, numberFormatters.percent)}%`;
-            cells.pct.textContent = pctText;
-            cells.preClose.textContent = formatNumber(stock.preClose, numberFormatters.price);
-            cells.open.textContent = formatNumber(stock.open, numberFormatters.price);
-            cells.high.textContent = formatNumber(stock.high, numberFormatters.price);
-            cells.low.textContent = formatNumber(stock.low, numberFormatters.price);
-            cells.turnover.textContent = formatNumber(stock.turnover, numberFormatters.turnover);
+            setTextIfChanged(cells.pct, pctText);
+            setTextIfChanged(cells.preClose, formatNumber(stock.preClose, numberFormatters.price));
+            setTextIfChanged(cells.open, formatNumber(stock.open, numberFormatters.price));
+            setTextIfChanged(cells.high, formatNumber(stock.high, numberFormatters.price));
+            setTextIfChanged(cells.low, formatNumber(stock.low, numberFormatters.price));
+            setTextIfChanged(cells.turnover, formatNumber(stock.turnover, numberFormatters.turnover));
 
             fragment.appendChild(row);
         });
@@ -1098,6 +1222,8 @@ async function updateStockTable() {
             hsi: hsiData,
             china_index: hsceiData
         };
+
+        updateHealthUI();
     } finally {
         isRefreshing = false;
     }
@@ -1334,6 +1460,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     dom.bottomTime = document.getElementById('bottomTime');
     dom.toggleListButton = document.getElementById('toggleListButton');
     dom.sortModeButton = document.getElementById('sortModeButton');
+    dom.sourceHealth = document.getElementById('sourceHealth');
     dom.toast = document.getElementById('toast');
 
     indexElements.hsi = {
@@ -1357,6 +1484,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     setControlsEnabled(true);
     initResizableColumns();
     initControls();
+
+    // Pause when hidden (save battery + reduce useless requests)
+    const onVisibilityChange = () => {
+        pausedByVisibility = document.hidden;
+        if (pausedByVisibility) {
+            if (refreshTimer) clearTimeout(refreshTimer);
+            scheduleNextRefresh();
+        } else {
+            // Return to foreground: refresh immediately
+            updateStockTable().finally(() => scheduleNextRefresh());
+        }
+        updateHealthUI();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('focus', () => {
+        if (!document.hidden) onVisibilityChange();
+    });
+
+    updateHealthUI();
 
     // Initial data load, then start smart schedule
     updateStockTable().then(() => {
