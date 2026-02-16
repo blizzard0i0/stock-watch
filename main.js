@@ -1,21 +1,53 @@
-const DEFAULT_CODES = ['00388', '00700', '9992'];
+// --------------------
+// Config (集中常數 + storage keys，方便維護/升級)
+// --------------------
+const CONFIG = {
+    DEFAULT_CODES: ['00388', '00700', '9992'],
+    HSI_LIST_URL: './hsi_constituents.json',
+    STORAGE_KEYS: {
+        HSI_LIST: 'hk_hsi_list_v1',
+        COLS: 'hk_stock_cols_v6',
+        LIST: 'hk_stock_list_v1',
+        INTERVAL: 'hk_stock_interval_v1',
+        SORT_LEGACY: 'hk_stock_sort_v1',
+        SORT_MODE: 'hk_stock_sort_mode_v1'
+    },
+    TRADE: {
+        START_HOUR: 9,
+        START_MIN: 0,
+        MORNING_END_HOUR: 12,
+        MORNING_END_MIN: 0,
+        AFTERNOON_START_HOUR: 13,
+        AFTERNOON_START_MIN: 0,
+        END_HOUR: 16,
+        END_MIN: 10
+    },
+    SCHEDULER: {
+        // Avoid extremely large setTimeout() delays (iOS Safari/PWA stability)
+        MAX_TIMEOUT_MS: 1000 * 60 * 60,   // 1 hour
+        CLOSED_TICK_MS: 1000 * 60         // 60 seconds
+    },
+    HSI_BATCH_SIZE: 20
+};
+
+const DEFAULT_CODES = CONFIG.DEFAULT_CODES;
 
 // --- 恒生指數成份股 (HSI) list ---
 // NOTE: 成份股會不時調整。如你要更新：
 // 1) 直接修改 DEFAULT_HSI_CODES；或
 // 2) 在同一個目錄放一個 hsi_constituents.json (內容係 ['00001','00002',...])，系統會優先讀取。
-const HSI_LIST_URL = './hsi_constituents.json';
-const STORAGE_KEY_HSI_LIST = 'hk_hsi_list_v1';
+const HSI_LIST_URL = CONFIG.HSI_LIST_URL;
+const STORAGE_KEY_HSI_LIST = CONFIG.STORAGE_KEYS.HSI_LIST;
 const DEFAULT_HSI_CODES = ["00001", "00002", "00003", "00005", "00006", "00011", "00012", "00016", "00017", "00019", "00020", "00027", "00066", "00101", "00135", "00144", "00151", "00175", "00267", "00288", "00291", "00386", "00388", "00390", "00493", "00669", "00688", "00700", "00762", "00823", "00836", "00857", "00883", "00939", "00941", "00960", "00981", "00992", "01024", "01038", "01088", "01093", "01109", "01113", "01114", "01177", "01211", "01299", "01398", "01516", "01618", "01810", "01833", "01928", "01972", "01988", "02007", "02269", "02313", "02318", "02319", "02328", "02382", "02628", "02828", "03328", "03690", "03888", "03968", "03988", "06098", "06618", "06862", "09618", "09868", "09988"];
 
 let hsiCodes = [...DEFAULT_HSI_CODES];
 let listMode = 'watch'; // 'watch' | 'hsi'
 
-const STORAGE_KEY_COLS = 'hk_stock_cols_v6';
-const STORAGE_KEY_LIST = 'hk_stock_list_v1';
-const STORAGE_KEY_INTERVAL = 'hk_stock_interval_v1';
-const STORAGE_KEY_SORT = 'hk_stock_sort_v1'; // legacy (code asc/desc)
-const STORAGE_KEY_SORT_MODE = 'hk_stock_sort_mode_v1'; // new (code / %desc / %asc)
+const STORAGE_KEY_COLS = CONFIG.STORAGE_KEYS.COLS;
+const STORAGE_KEY_LIST = CONFIG.STORAGE_KEYS.LIST;
+const STORAGE_KEY_INTERVAL = CONFIG.STORAGE_KEYS.INTERVAL;
+const STORAGE_KEY_SORT = CONFIG.STORAGE_KEYS.SORT_LEGACY; // legacy (code asc/desc)
+const STORAGE_KEY_SORT_MODE = CONFIG.STORAGE_KEYS.SORT_MODE; // new (code / %desc / %asc)
 
 let stockCodes = [];
 let stockStates = {};
@@ -37,6 +69,8 @@ let indexDataCache = {
 };
 
 let refreshTimer = null;
+let schedulerToken = 0;
+let lastScheduledTickMs = 0;
 let refreshRateSec = 5; // Default 5s
 // Sorting display mode:
 // - code: stock number small -> large
@@ -44,14 +78,14 @@ let refreshRateSec = 5; // Default 5s
 // - pct_asc: % change small -> large
 let sortMode = 'code';
 
-const TRADE_START_HOUR = 9;
-const TRADE_START_MIN = 0;  // 9:00
-const TRADE_MORNING_END_HOUR = 12;
-const TRADE_MORNING_END_MIN = 0; // 12:00
-const TRADE_AFTERNOON_START_HOUR = 13;
-const TRADE_AFTERNOON_START_MIN = 0; // 13:00
-const TRADE_END_HOUR = 16;
-const TRADE_END_MIN = 10;   // 16:10
+const TRADE_START_HOUR = CONFIG.TRADE.START_HOUR;
+const TRADE_START_MIN = CONFIG.TRADE.START_MIN;  // 9:00
+const TRADE_MORNING_END_HOUR = CONFIG.TRADE.MORNING_END_HOUR;
+const TRADE_MORNING_END_MIN = CONFIG.TRADE.MORNING_END_MIN; // 12:00
+const TRADE_AFTERNOON_START_HOUR = CONFIG.TRADE.AFTERNOON_START_HOUR;
+const TRADE_AFTERNOON_START_MIN = CONFIG.TRADE.AFTERNOON_START_MIN; // 13:00
+const TRADE_END_HOUR = CONFIG.TRADE.END_HOUR;
+const TRADE_END_MIN = CONFIG.TRADE.END_MIN;   // 16:10
 
 const HOLIDAY_CACHE_KEY = 'hk_holiday_calendar_v1';
 const HOLIDAY_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
@@ -177,6 +211,7 @@ function switchToHsiList() {
     sortStocks();
     updateToggleButtonUI();
     setControlsEnabled(false);
+    showToast('HSI constituents mode');
     updateStockTable();
 }
 
@@ -185,12 +220,24 @@ function switchToWatchList() {
     loadStockList(); // Restore from localStorage
     updateToggleButtonUI();
     setControlsEnabled(true);
+    showToast('Watchlist mode');
     updateStockTable();
 }
 
 function toggleListMode() {
     if (isHsiMode()) switchToWatchList();
     else switchToHsiList();
+}
+
+let toastTimer = null;
+function showToast(message, durationMs = 1200) {
+    if (!dom.toast) return;
+    dom.toast.textContent = message;
+    dom.toast.classList.add('show');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+        dom.toast.classList.remove('show');
+    }, durationMs);
 }
 
 function loadRefreshInterval() {
@@ -453,10 +500,15 @@ function isTradingHours() {
 
 function scheduleNextRefresh() {
     if (refreshTimer) clearTimeout(refreshTimer);
+    // Token to invalidate any previously scheduled callbacks
+    const myToken = ++schedulerToken;
     const statusEl = dom.status;
     const nextRefreshEl = dom.nextRefresh;
     const now = new Date();
     const marketStatus = getMarketStatus(now);
+
+    const maxTimeout = CONFIG.SCHEDULER.MAX_TIMEOUT_MS;
+    const closedTickMs = CONFIG.SCHEDULER.CLOSED_TICK_MS;
 
     if (marketStatus.state === 'open') {
         if (holidayState.status === 'unavailable') {
@@ -466,13 +518,40 @@ function scheduleNextRefresh() {
             statusEl.textContent = 'Active (Mon-Fri 9:00-12:00, 13:00-16:10)';
             statusEl.style.color = '#006600';
         }
-        const nextTime = new Date(now.getTime() + (refreshRateSec * 1000));
+        // If we just transitioned into open state, refresh once immediately.
+        if (!lastScheduledTickMs) {
+            lastScheduledTickMs = now.getTime();
+            updateStockTable().finally(() => {
+                if (myToken !== schedulerToken) return;
+                scheduleNextRefresh();
+            });
+            return;
+        }
+
+        // Keep the configured refresh frequency as close as possible.
+        // Schedule based on the last tick target time, not "finish time".
+        const intervalMs = refreshRateSec * 1000;
+        const nowMs = now.getTime();
+        const targetMs = lastScheduledTickMs ? (lastScheduledTickMs + intervalMs) : (nowMs + intervalMs);
+        const effectiveTargetMs = targetMs < nowMs ? nowMs : targetMs;
+        lastScheduledTickMs = effectiveTargetMs;
+
+        const nextTime = new Date(effectiveTargetMs);
         nextRefreshEl.textContent = nextTime.toLocaleTimeString();
+
+        const delayMs = Math.min(Math.max(0, effectiveTargetMs - nowMs), maxTimeout);
         refreshTimer = setTimeout(() => {
-            updateStockTable().then(() => { scheduleNextRefresh(); });
-        }, refreshRateSec * 1000);
+            if (myToken !== schedulerToken) return;
+            updateStockTable().finally(() => {
+                if (myToken !== schedulerToken) return;
+                scheduleNextRefresh();
+            });
+        }, delayMs);
         return;
     }
+
+    // Not open: reset tick baseline
+    lastScheduledTickMs = 0;
 
     const nextStart = marketStatus.nextOpen || getNextTradingDayStart(now);
     const delay = nextStart.getTime() - now.getTime();
@@ -492,11 +571,19 @@ function scheduleNextRefresh() {
     nextRefreshEl.textContent = dateStr;
 
     if (delay > 0) {
+        // Avoid very large delays; keep a short heartbeat and re-calc.
+        const delayMs = Math.min(delay, maxTimeout);
         refreshTimer = setTimeout(() => {
-            updateStockTable().then(() => { scheduleNextRefresh(); });
-        }, delay);
+            if (myToken !== schedulerToken) return;
+            // If we're still not open, just re-calc (cheap). When it becomes open,
+            // it will start refreshing again.
+            scheduleNextRefresh();
+        }, delayMs);
     } else {
-        refreshTimer = setTimeout(scheduleNextRefresh, 1000);
+        refreshTimer = setTimeout(() => {
+            if (myToken !== schedulerToken) return;
+            scheduleNextRefresh();
+        }, closedTickMs);
     }
 }
 
@@ -639,14 +726,18 @@ async function fetchStockData(code) {
         return {
             code: code,
             name: name,
-            quote: currentPrice !== 'N/A' ? currentPrice : 'N/A',
+            quote: Number.isFinite(currentPrice) ? currentPrice : 'N/A',
             change: change,
             pctChange: pctChange,
             preClose: data.daily.preCPrice || 'N/A',
             open: data.opening.openPrice || 'N/A',
             high: data.real.dyh || 'N/A',
             low: data.real.dyl || 'N/A',
-            turnover: (parseInt(data.real.tvr, 10) / 1000000).toFixed(2) || 'N/A',
+            turnover: (() => {
+                const tvrNum = parseInt(data?.real?.tvr, 10);
+                if (!Number.isFinite(tvrNum)) return 'N/A';
+                return (tvrNum / 1000000).toFixed(2);
+            })(),
             dayDirection: dayDirection,
             error: false
         };
@@ -814,6 +905,25 @@ function getRowForStock(code) {
     return rowCache.get(code);
 }
 
+async function fetchStockDataForVisibleList(codes) {
+    // Only update what user is currently viewing (watchlist or HSI list).
+    // In HSI mode, update in batches to avoid firing 70+ requests at once.
+    if (!Array.isArray(codes) || codes.length === 0) return [];
+    if (!isHsiMode() || codes.length <= CONFIG.HSI_BATCH_SIZE) {
+        return Promise.all(codes.map(code => fetchStockData(code)));
+    }
+
+    const out = [];
+    const batchSize = CONFIG.HSI_BATCH_SIZE;
+    for (let i = 0; i < codes.length; i += batchSize) {
+        const batch = codes.slice(i, i + batchSize);
+        // Keep within-batch concurrency at 20, as requested.
+        const batchRes = await Promise.all(batch.map(code => fetchStockData(code)));
+        out.push(...batchRes);
+    }
+    return out;
+}
+
 async function updateStockTable() {
     if (isRefreshing) return;
     isRefreshing = true;
@@ -828,16 +938,16 @@ async function updateStockTable() {
         }
         if (tbody.children.length === 0) tbody.innerHTML = '<tr><td colspan="12">Loading data...</td></tr>';
 
-        const stockPromises = stockCodes.map(code => fetchStockData(code));
+        const codesToUpdate = [...stockCodes];
         const [stockSettled, hsiSettled, hsceiSettled] = await Promise.allSettled([
-            Promise.all(stockPromises),
+            fetchStockDataForVisibleList(codesToUpdate),
             fetchIndexData('HSI'),
             fetchIndexData('HSCEI')
         ]);
 
         const stockData = stockSettled.status === 'fulfilled'
             ? stockSettled.value
-            : stockCodes.map(code => ({
+            : codesToUpdate.map(code => ({
                 code,
                 name: 'ERROR',
                 quote: 'N/A',
@@ -1224,6 +1334,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     dom.bottomTime = document.getElementById('bottomTime');
     dom.toggleListButton = document.getElementById('toggleListButton');
     dom.sortModeButton = document.getElementById('sortModeButton');
+    dom.toast = document.getElementById('toast');
 
     indexElements.hsi = {
         valueEl: document.getElementById('hsi_value'),

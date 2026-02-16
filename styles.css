@@ -132,6 +132,27 @@ tr:nth-child(even) { background-color: #f9f9f9; }
 .resizer:hover { background: rgba(0, 0, 0, 0.1); }
 .resizer.isResizing { background: rgba(0, 0, 255, 0.3); }
 
+/* Toast (mode switch hint) */
+.toast {
+    position: fixed;
+    left: 50%;
+    bottom: 18px;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.85);
+    color: #fff;
+    padding: 10px 14px;
+    border-radius: 999px;
+    font-size: 13px;
+    line-height: 1.2;
+    max-width: calc(100% - 24px);
+    text-align: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 160ms ease;
+    z-index: 9999;
+}
+.toast.show { opacity: 1; }
+
 /* --- Control Panel --- */
 .controls {
     display: flex;
@@ -220,6 +241,9 @@ tr:nth-child(even) { background-color: #f9f9f9; }
     .timestamp::after {
         content: "\00a0";
     }
+
+    /* Easier to grab on mobile */
+    .resizer { width: 16px; }
 
     .controls {
         gap: 10px;
