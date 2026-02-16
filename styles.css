@@ -52,7 +52,6 @@ body {
 /* Top-right sort mode button */
 .btn-sortmode { margin-left: 6px; min-width: 44px; text-align: center; }
 
-
 /* Footer info line under the table */
 .footer-info {
     font-size: 14px;
@@ -218,47 +217,69 @@ tr:nth-child(even) { background-color: #f9f9f9; }
     border: 0;
 }
 
-/* Mobile header layout (e.g. iPhone):
-   Row 1: " 恒指" on the left, time on the right (with a trailing space)
-   Row 2: " 國指" on the left
-*/
+/* Mobile tweaks */
 @media (max-width: 700px) {
-    .header {
-        justify-content: space-between;
-        align-items: center;
-    }
-
-    #hsi-wrapper {
-        order: 1;
-        flex: 1 1 auto;
-        text-align: left;
-        white-space: nowrap;
-    }
-
-    .timestamp {
-        order: 2;
-        flex: 0 0 auto;
-        margin-left: auto;
-        text-align: right;
-        white-space: nowrap;
-    }
-
-    #hscei-wrapper {
-        order: 3;
-        flex: 1 1 100%;
-        text-align: left;
-        white-space: nowrap;
-    }
-
-    /* Add exactly one blank space after the time */
-    .timestamp::after {
-        content: "\00a0";
-    }
+    .header { justify-content: space-between; align-items: center; }
+    #hsi-wrapper { order: 1; flex: 1 1 auto; text-align: left; white-space: nowrap; }
+    .timestamp { order: 2; flex: 0 0 auto; margin-left: auto; text-align: right; white-space: nowrap; }
+    #hscei-wrapper { order: 3; flex: 1 1 100%; text-align: left; white-space: nowrap; }
 
     /* Easier to grab on mobile */
     .resizer { width: 16px; }
 
-    .controls {
-        gap: 10px;
+    .controls { gap: 10px; }
+}
+
+/* iPhone: EXACT 2-row layout you requested
+   Row 1: left 恒指 | right 時間
+   Row 2: left 國指 | right 按鈕+綠燈
+*/
+@media (max-width: 520px) {
+
+    /* Whole header becomes 2x2 grid */
+    .header {
+        display: grid !important;
+        grid-template-columns: 1fr auto;
+        grid-template-rows: auto auto;
+        align-items: center;
+        column-gap: 10px;
+        row-gap: 0px; /* no extra gap between 恒指/國指 */
     }
+
+    /* Left column fixed rows */
+    #hsi-wrapper   { grid-column: 1; grid-row: 1; text-align: left; }
+    #hscei-wrapper { grid-column: 1; grid-row: 2; text-align: left; }
+
+    /* Right column: timestamp spans 2 rows, but internally split into 2 rows */
+    .timestamp {
+        grid-column: 2;
+        grid-row: 1 / 3;
+
+        display: grid !important;
+        grid-template-columns: auto auto 14px; /* HSI | 123 | dot */
+        grid-template-rows: auto auto;         /* time row | buttons row */
+        align-items: center;
+        justify-content: end;
+        column-gap: 8px;
+        row-gap: 6px;
+
+        /* override old flex */
+        white-space: normal !important;
+        margin-left: 0 !important;
+        text-align: right;
+    }
+
+    /* Time MUST be only on row 1 */
+    #current_time {
+        grid-column: 1 / 4;
+        grid-row: 1;
+        justify-self: end;
+        text-align: right;
+        white-space: nowrap;
+    }
+
+    /* Buttons + dot MUST be only on row 2 */
+    #toggleListButton { grid-column: 1; grid-row: 2; }
+    #sortModeButton   { grid-column: 2; grid-row: 2; }
+    #sourceHealth     { grid-column: 3; grid-row: 2; justify-self: end; }
 }
