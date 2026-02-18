@@ -1,6 +1,6 @@
 # HK Stock Watch (PWA)
 
-一個輕量、可離線使用嘅香港股票 Watchlist／恒生指數成份股監控頁（PWA）。支援自訂股票清單、即時報價、智能刷新（配合港股交易時段）、多種排序模式、欄位拖拉縮放並自動保存。
+一個輕量、可離線使用嘅香港股票 Watchlist／恒指「權重 Top 50」監控頁（PWA）。支援自訂股票清單、即時報價、智能刷新（配合港股交易時段）、多種排序模式、欄位拖拉縮放並自動保存。
 
 🔗 Demo：st.b0i0.xyz
 
@@ -8,16 +8,20 @@
 
 ## ✨ 功能特色
 
-- **Watchlist + HSI 成份股一鍵切換**
-  - 右上角按鈕切換：`WL`（自訂清單）↔ `HSI`（恒指成份股）
-  - HSI 模式為「唯讀」：會停用新增/刪除/重設清單（避免誤改）
-  - HSI 成份股清單支援本地檔案 `hsi_constituents.json` 覆寫
+- **Watchlist ↔ 恒指 Top 50 一鍵切換**
+  - 右上角按鈕切換：`WL`（自訂清單）↔ `HSI`（恒指 Top 50）
+  - `HSI` 模式為「唯讀」：會停用新增/刪除/重設清單（避免誤改）
+  - 恒指 Top 50 清單支援本地檔案 `hsi_constituents.json` 覆寫（預設會讀取同目錄檔案）
 
 - **排序模式（即時切換）**
   - `123`：按股票代號（小→大）
   - `%↓`：按升跌幅（大→小）
   - `%↑`：按升跌幅（小→大）
   - 排序模式會記住（localStorage）
+
+- **資料來源切換 + 健康指示**
+  - 右上角可切換資料源：`ON`（on.cc）/ `TX`（Tencent）
+  - 綠燈（圓點）顯示最近一段時間成功率/平均延遲（方便判斷端點是否「死下死下」）
 
 - **智能刷新（配合港股交易時間）**
   - 交易時段（Mon–Fri）：09:00–12:00、13:00–16:10 內按你設定秒數刷新
@@ -28,15 +32,24 @@
   - 優先拉取公開假期 API（線上）
   - 失敗時使用 cache；再失敗就用內建 fallback（已預置 2026 年）以保持離線可用
 
-- **表格操作友善**
+- **表格操作友善（手機/桌面）**
   - 欄位可拖拉縮放（iPhone / Desktop 均可用）
   - 欄寬與表格總寬會自動保存（localStorage）
   - 價格/升跌幅顏色標示 + 即時跳動背景（tick up/down）
   - 顯示「日內高/低」觸碰提示箭咀（到頂/到底）
 
 - **PWA / 離線快取**
-  - 具備 `manifest.json`、Service Worker 預快取核心檔案
+  - 具備 `manifest.json`、Service Worker 預快取核心檔案（app-shell）
   - iOS/Safari 針對跨域 API **不做快取**，降低「舊數據」風險
+
+---
+
+## 📌 關於 `HSI` 清單：目前係「權重 Top 50」
+
+⚠️ 注意：repo 內嘅 `hsi_constituents.json` **只包含恒生指數權重最高 Top 50 股票**，並非完整恒指全部成份股。
+
+- `HSI` 模式會直接用 `hsi_constituents.json` 內容作為清單
+- 你可以自行更新/擴充（例如改成全成份股），程式會自動讀取
 
 ---
 
@@ -60,8 +73,9 @@
 
 > 本專案屬於前端頁面，直接向第三方公開端點拉取資料。
 
-- 個股報價：`https://realtime-money18-cdn.on.cc/securityQuote/genStockDetailHKJSON.php?stockcode=XXXXX`
+- 個股報價（on.cc）：`https://realtime-money18-cdn.on.cc/securityQuote/genStockDetailHKJSON.php?stockcode=XXXXX`
 - 指數資料（HSI / HSCEI）：`https://realtime-money18-cdn.on.cc/securityQuote/genIndexDetailHKJSON.php?code=HSI|HSCEI`
+- 個股報價（Tencent）：`https://qt.gtimg.cn/q=hk00700,hk00941,...`（批量）
 - 香港公眾假期（線上）：`https://date.nager.at/api/v3/PublicHolidays/{year}/HK`
 
 ⚠️ 免責聲明：以上來源可能隨時更改或限制；本專案只作資訊展示用途，不構成投資建議。  
@@ -106,29 +120,33 @@ python3 -m http.server 8080
 const DEFAULT_CODES = ['00388', '00700', '9992'];
 ```
 
-### ✅ HSI 成份股清單更新
-專案會優先讀取同目錄的 `hsi_constituents.json`。你只要更新此檔案內容，例如：
+### ✅ 更新恒指清單（Top 50 或自訂清單）
+專案會優先讀取同目錄的 `hsi_constituents.json`。格式如下（字串陣列、5 位數股票代碼）：
 
 ```json
 ["00001","00002","00003","..."]
 ```
 
+> 貼士：如果你想改成「完整恒指成份股」，只要將更多代碼加入此檔案即可；UI 同刷新/排序邏輯會自動套用。
+
 ---
 
 ## 🧹 快取版本更新（重要）
 
-當你修改核心檔案後，建議同步更新 `sw.js` 內的 cache name（例如 `v19 → v20`）以確保用戶取得新版本：
+當你修改核心檔案後，建議同步更新 `sw.js` 內的 cache name（例如 `v22 → v23`）以確保用戶取得新版本：
 
 ```js
-const CACHE_NAME = 'hk-stock-store-v19';
+const CACHE_NAME = 'hk-stock-store-v22';
 ```
+
+另外，`main.js` 已採用 `?v=` 版本號（例如 `main.js?v=23`），亦有助強制更新。
 
 ---
 
 ## 🔐 私隱與安全
 
 - 本專案不需要登入、無後端、無收集個人資料
-- 使用 localStorage 只保存：自訂清單、欄寬、刷新秒數、排序模式、假期 cache
+- 使用 localStorage 只保存：自訂清單、欄寬、刷新秒數、排序模式、資料源偏好、假期 cache
 
 ---
 
