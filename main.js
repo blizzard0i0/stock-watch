@@ -10,7 +10,8 @@ const CONFIG = {
         LIST: 'hk_stock_list_v1',
         INTERVAL: 'hk_stock_interval_v1',
         SORT_LEGACY: 'hk_stock_sort_v1',
-        SORT_MODE: 'hk_stock_sort_mode_v1'
+        SORT_MODE: 'hk_stock_sort_mode_v1',
+        SOURCE: 'hk_stock_source_v1'
     },
     TRADE: {
         START_HOUR: 9,
@@ -27,7 +28,8 @@ const CONFIG = {
         MAX_TIMEOUT_MS: 1000 * 60 * 60,   // 1 hour
         CLOSED_TICK_MS: 1000 * 60         // 60 seconds
     },
-    HSI_BATCH_SIZE: 20
+    HSI_BATCH_SIZE: 20,
+    TENCENT_BATCH_SIZE: 40
 };
 
 const DEFAULT_CODES = CONFIG.DEFAULT_CODES;
@@ -48,6 +50,9 @@ const STORAGE_KEY_LIST = CONFIG.STORAGE_KEYS.LIST;
 const STORAGE_KEY_INTERVAL = CONFIG.STORAGE_KEYS.INTERVAL;
 const STORAGE_KEY_SORT = CONFIG.STORAGE_KEYS.SORT_LEGACY; // legacy (code asc/desc)
 const STORAGE_KEY_SORT_MODE = CONFIG.STORAGE_KEYS.SORT_MODE; // new (code / %desc / %asc)
+
+const STORAGE_KEY_SOURCE = CONFIG.STORAGE_KEYS.SOURCE;
+let dataSource = 'oncc'; // 'oncc' | 'tencent'
 
 let stockCodes = [];
 let stockStates = {};
@@ -300,6 +305,37 @@ function updateSortModeButtons() {
         dom.sortButton.textContent = sortModeLabelLong();
     }
 }
+
+
+function sourceLabelShort() {
+    return dataSource === 'tencent' ? 'TX' : 'ON';
+}
+function sourceLabelLong() {
+    return dataSource === 'tencent' ? 'Source: Tencent (qt.gtimg.cn)' : 'Source: on.cc';
+}
+function updateSourceButtonUI() {
+    if (!dom.sourceToggleButton) return;
+    dom.sourceToggleButton.textContent = sourceLabelShort();
+    dom.sourceToggleButton.title = sourceLabelLong();
+    dom.sourceToggleButton.classList.toggle('active', dataSource === 'tencent');
+}
+function loadDataSource() {
+    const stored = localStorage.getItem(STORAGE_KEY_SOURCE);
+    if (stored === 'oncc' || stored === 'tencent') dataSource = stored;
+    updateSourceButtonUI();
+}
+function toggleDataSource() {
+    dataSource = (dataSource === 'oncc') ? 'tencent' : 'oncc';
+    localStorage.setItem(STORAGE_KEY_SOURCE, dataSource);
+
+    // Reset health window so dot reflects new source quickly
+    healthHistory.length = 0;
+    updateHealthUI();
+    updateSourceButtonUI();
+    showToast(`Data source: ${dataSource === 'tencent' ? 'Tencent' : 'on.cc'}`);
+    updateStockTable();
+}
+
 
 function getSortedStockData(stockData) {
     const normalizePct = (s) => {
@@ -720,7 +756,7 @@ function extractStockName(data) {
     return String(rawName).trim();
 }
 
-async function fetchStockData(code) {
+async function fetchStockDataOncc(code) {
     try {
         const response = await fetchWithTimeout(`https://realtime-money18-cdn.on.cc/securityQuote/genStockDetailHKJSON.php?stockcode=${code}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -776,6 +812,142 @@ async function fetchStockData(code) {
             errorMessage: isInvalid ? 'Invalid stock code.' : 'Data unavailable. Retrying on next refresh.'
         };
     }
+}
+
+
+function decodeGbText(arrayBuffer) {
+    try {
+        // gb18030 is widely supported and compatible with gb2312
+        return new TextDecoder('gb18030').decode(arrayBuffer);
+    } catch (_) {
+        try { return new TextDecoder('gbk').decode(arrayBuffer); } catch (_) {}
+    }
+    // Fallback (may show garbled Chinese, but numeric fields still parse)
+    return new TextDecoder('utf-8').decode(arrayBuffer);
+}
+
+async function fetchTencentBatchRaw(codes) {
+    if (!Array.isArray(codes) || codes.length === 0) return new Map();
+    const symbols = codes.map(c => `hk${String(c).padStart(5, '0')}`).join(',');
+    const url = `https://qt.gtimg.cn/q=${symbols}`;
+    const response = await fetchWithTimeout(url, 8000);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    // Use ArrayBuffer so we can decode GB2312/GBK correctly.
+    const buf = await response.arrayBuffer();
+    const text = decodeGbText(buf);
+
+    const map = new Map();
+    const reLine = /v_hk(\d{5})="([^"]*)"/g;
+    let m;
+    while ((m = reLine.exec(text)) !== null) {
+        const code = m[1];
+        const payload = m[2] || '';
+        const parts = payload.split('~');
+        map.set(code, parts);
+    }
+    return map;
+}
+
+function toTencentStockObject(code, parts) {
+    const safe = (i) => (parts && parts[i] !== undefined) ? String(parts[i]).trim() : '';
+    const name = safe(1);
+    const priceStr = safe(3);
+    const preCloseStr = safe(4);
+    const openStr = safe(5);
+    const volumeStr = safe(6);
+    const changeStr = safe(31);
+    const pctStr = safe(32);
+    const highStr = safe(33);
+    const lowStr = safe(34);
+
+    const priceVal = parseFloat(priceStr);
+    const preCloseVal = parseFloat(preCloseStr);
+
+    const dayDirection = dayDirectionFromValues(priceVal, preCloseVal);
+
+    // Turnover field isn't in the provided key list; keep N/A to avoid misinformation.
+    const turnover = 'N/A';
+
+    const isValid = !!name && Number.isFinite(priceVal);
+    if (!isValid) {
+        return {
+            code,
+            name: name || 'ERROR',
+            quote: 'N/A',
+            change: 'N/A',
+            pctChange: 'N/A',
+            preClose: 'N/A',
+            open: 'N/A',
+            high: 'N/A',
+            low: 'N/A',
+            turnover: 'N/A',
+            dayDirection: 'none',
+            error: true,
+            errorMessage: 'Data unavailable. Retrying on next refresh.'
+        };
+    }
+
+    return {
+        code,
+        name,
+        quote: priceStr || 'N/A',
+        change: changeStr || (Number.isFinite(priceVal) && Number.isFinite(preCloseVal) ? (priceVal - preCloseVal).toFixed(3).replace(/\.?0+$/, '') : 'N/A'),
+        pctChange: pctStr || (Number.isFinite(priceVal) && Number.isFinite(preCloseVal) && preCloseVal !== 0 ? (((priceVal - preCloseVal) / preCloseVal) * 100).toFixed(2) : 'N/A'),
+        preClose: preCloseStr || 'N/A',
+        open: openStr || 'N/A',
+        high: highStr || 'N/A',
+        low: lowStr || 'N/A',
+        turnover,
+        dayDirection,
+        error: false
+    };
+}
+
+async function fetchStockDataTencentBatch(codes) {
+    const normalized = (codes || []).map(c => String(c).trim().padStart(5, '0')).filter(Boolean);
+    if (normalized.length === 0) return [];
+
+    const map = await fetchTencentBatchRaw(normalized);
+    return normalized.map(code => {
+        const parts = map.get(code);
+        if (!parts) {
+            return {
+                code,
+                name: 'ERROR',
+                quote: 'N/A',
+                change: 'N/A',
+                pctChange: 'N/A',
+                preClose: 'N/A',
+                open: 'N/A',
+                high: 'N/A',
+                low: 'N/A',
+                turnover: 'N/A',
+                dayDirection: 'none',
+                error: true,
+                errorMessage: 'Data unavailable. Retrying on next refresh.'
+            };
+        }
+        return toTencentStockObject(code, parts);
+    });
+}
+
+async function fetchStockDataTencentForList(codes) {
+    if (!Array.isArray(codes) || codes.length === 0) return [];
+    const out = [];
+    const batchSize = CONFIG.TENCENT_BATCH_SIZE;
+    for (let i = 0; i < codes.length; i += batchSize) {
+        const batch = codes.slice(i, i + batchSize);
+        const batchRes = await fetchStockDataTencentBatch(batch);
+        out.push(...batchRes);
+    }
+    return out;
+}
+
+async function fetchStockData(code) {
+    return dataSource === 'tencent'
+        ? (await fetchStockDataTencentBatch([code]))[0]
+        : await fetchStockDataOncc(code);
 }
 
 async function fetchIndexData(indexCode) {
@@ -1020,18 +1192,23 @@ function getRowForStock(code) {
 
 async function fetchStockDataForVisibleList(codes) {
     // Only update what user is currently viewing (watchlist or HSI list).
-    // In HSI mode, update in batches to avoid firing 70+ requests at once.
     if (!Array.isArray(codes) || codes.length === 0) return [];
+
+    // Tencent API supports batching; prefer fewer requests (especially for HSI mode).
+    if (dataSource === 'tencent') {
+        return await fetchStockDataTencentForList(codes);
+    }
+
+    // on.cc: In HSI mode, update in batches to avoid firing 70+ requests at once.
     if (!isHsiMode() || codes.length <= CONFIG.HSI_BATCH_SIZE) {
-        return Promise.all(codes.map(code => fetchStockData(code)));
+        return Promise.all(codes.map(code => fetchStockDataOncc(code)));
     }
 
     const out = [];
     const batchSize = CONFIG.HSI_BATCH_SIZE;
     for (let i = 0; i < codes.length; i += batchSize) {
         const batch = codes.slice(i, i + batchSize);
-        // Keep within-batch concurrency at 20, as requested.
-        const batchRes = await Promise.all(batch.map(code => fetchStockData(code)));
+        const batchRes = await Promise.all(batch.map(code => fetchStockDataOncc(code)));
         out.push(...batchRes);
     }
     return out;
@@ -1430,6 +1607,7 @@ function initControls() {
     dom.addStockButton.addEventListener('click', addStock);
     if (dom.toggleListButton) dom.toggleListButton.addEventListener('click', toggleListMode);
     if (dom.sortModeButton) dom.sortModeButton.addEventListener('click', cycleSortMode);
+    if (dom.sourceToggleButton) dom.sourceToggleButton.addEventListener('click', toggleDataSource);
     dom.setRefreshButton.addEventListener('click', setRefreshInterval);
     dom.resetButton.addEventListener('click', resetDefaults);
     dom.sortButton.addEventListener('click', cycleSortMode);
@@ -1461,6 +1639,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     dom.toggleListButton = document.getElementById('toggleListButton');
     dom.sortModeButton = document.getElementById('sortModeButton');
     dom.sourceHealth = document.getElementById('sourceHealth');
+    dom.sourceToggleButton = document.getElementById('sourceToggleButton');
     dom.toast = document.getElementById('toast');
 
     indexElements.hsi = {
@@ -1477,6 +1656,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
     loadRefreshInterval();
     loadSortMode();
+    loadDataSource();
     loadStockList();
     await loadHolidayCalendar();
     await loadHsiConstituents();
