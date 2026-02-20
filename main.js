@@ -2,7 +2,7 @@
 // Config (集中常數 + storage keys，方便維護/升級)
 // --------------------
 const CONFIG = {
-    DEFAULT_CODES: ['00388', '00700', '01183', '01195', '01458', '02317', '02391', '02592', '9896', '9988', '9992', '55852'],
+    DEFAULT_CODES: ['00388', '00700', '9988', '9992'],
     HSI_LIST_URL: './hsi_constituents.json',
     STORAGE_KEYS: {
         HSI_LIST: 'hk_hsi_list_v1',
