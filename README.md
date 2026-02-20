@@ -71,15 +71,21 @@
 
 ## 🧠 資料來源（API）
 
-> 本專案屬於前端頁面，直接向第三方公開端點拉取資料。
+> 本專案屬於純前端頁面，直接向第三方公開端點拉取資料。
 
-- 個股報價（on.cc）：`https://realtime-money18-cdn.on.cc/securityQuote/genStockDetailHKJSON.php?stockcode=XXXXX`
-- 指數資料（HSI / HSCEI）：`https://realtime-money18-cdn.on.cc/securityQuote/genIndexDetailHKJSON.php?code=HSI|HSCEI`
-- 個股報價（Tencent）：`https://qt.gtimg.cn/q=hk00700,hk00941,...`（批量）
-- 香港公眾假期（線上）：`https://date.nager.at/api/v3/PublicHolidays/{year}/HK`
+- 個股報價（on.cc）：
+  - `https://realtime-money18-cdn.on.cc/securityQuote/genStockDetailHKJSON.php?stockcode=XXXXX`
+- 指數資料（HSI / HSCEI）：
+  - `https://realtime-money18-cdn.on.cc/securityQuote/genIndexDetailHKJSON.php?code=HSI|HSCEI`
 
-⚠️ 免責聲明：以上來源可能隨時更改或限制；本專案只作資訊展示用途，不構成投資建議。  
-（跨域 API 在 Service Worker 內已設定不作快取，以避免 iOS 返舊數據問題。）
+- 個股報價（Tencent，**Real-time batch**）：
+  - ✅ 推薦用法（即時）：`https://qt.gtimg.cn/q=r_hk00700,r_hk01183,...`
+  - 其中 `r_` 代表 real-time quote；如果唔加 `r_`，部分情況會出現 **~15 分鐘延遲**。
+
+- 香港公眾假期（線上）：
+  - `https://date.nager.at/api/v3/PublicHolidays/{year}/HK`
+
+⚠️ 免責聲明：以上來源可能隨時更改或限制；本專案只作資訊展示用途，不構成投資建議。
 
 ---
 
@@ -131,15 +137,21 @@ const DEFAULT_CODES = ['00388', '00700', '9992'];
 
 ---
 
-## 🧹 快取版本更新（重要）
+## 🧹 更新/快取（重要）
 
-當你修改核心檔案後，建議同步更新 `sw.js` 內的 cache name（例如 `v22 → v23`）以確保用戶取得新版本：
+PWA + Service Worker 會快取 app-shell（HTML/CSS/JS/manifest/icons）。當你改咗核心檔案後，建議同步做其中一個（或兩個都做）：
+
+1) **更新 `sw.js` 內的 cache name**（最穩陣）
 
 ```js
-const CACHE_NAME = 'hk-stock-store-v22';
+const CACHE_NAME = 'hk-stock-store-v24';
 ```
 
-另外，`main.js` 已採用 `?v=` 版本號（例如 `main.js?v=23`），亦有助強制更新。
+2) （可選）**硬刷新/清 SW cache**
+- Desktop Chrome：DevTools → Application → Service Workers → *Unregister*，再 Reload
+- iPhone：關掉「新增到主畫面」App，再重新加入（或清 Safari website data）
+
+> 注意：有啲部署環境對 `main.js?v=123` 呢種 query-string 形式嘅資產處理唔一致（可能 404 / cache miss）。為咗穩定，建議用「改 CACHE_NAME」做版本更新。
 
 ---
 
