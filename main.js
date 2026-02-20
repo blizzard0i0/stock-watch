@@ -2,7 +2,7 @@
 // Config (集中常數 + storage keys，方便維護/升級)
 // --------------------
 const CONFIG = {
-    DEFAULT_CODES: ['00388', '00700', '9992'],
+    DEFAULT_CODES: ['00388', '00700', '01183', '01195', '01458', '02317', '02391', '02592', '9896', '9988', '9992', '55852'],
     HSI_LIST_URL: './hsi_constituents.json',
     STORAGE_KEYS: {
         HSI_LIST: 'hk_hsi_list_v1',
@@ -311,7 +311,7 @@ function sourceLabelShort() {
     return dataSource === 'tencent' ? 'TX' : 'ON';
 }
 function sourceLabelLong() {
-    return dataSource === 'tencent' ? 'Source: Tencent (qt.gtimg.cn)' : 'Source: on.cc';
+    return dataSource === 'tencent' ? 'Source: Tencent RT (qt.gtimg.cn r_)' : 'Source: on.cc';
 }
 function updateSourceButtonUI() {
     if (!dom.sourceToggleButton) return;
@@ -828,7 +828,9 @@ function decodeGbText(arrayBuffer) {
 
 async function fetchTencentBatchRaw(codes) {
     if (!Array.isArray(codes) || codes.length === 0) return new Map();
-    const symbols = codes.map(c => `hk${String(c).padStart(5, '0')}`).join(',');
+    // Use Tencent "r_" realtime quote symbols (e.g. r_hk00700).
+    // Example: https://qt.gtimg.cn/q=r_hk00700,r_hk01183
+    const symbols = codes.map(c => `r_hk${String(c).padStart(5, '0')}`).join(',');
     const url = `https://qt.gtimg.cn/q=${symbols}`;
     const response = await fetchWithTimeout(url, 8000);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -838,7 +840,8 @@ async function fetchTencentBatchRaw(codes) {
     const text = decodeGbText(buf);
 
     const map = new Map();
-    const reLine = /v_hk(\d{5})="([^"]*)"/g;
+    // Realtime format uses v_r_hkXXXXX; keep v_hkXXXXX as fallback for compatibility.
+    const reLine = /v_(?:r_)?hk(\d{5})="([^"]*)"/g;
     let m;
     while ((m = reLine.exec(text)) !== null) {
         const code = m[1];

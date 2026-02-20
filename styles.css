@@ -3,6 +3,8 @@ body {
     margin: 10px;
     background-color: #f5f5f5;
     padding-bottom: 20px;
+    /* Keep text sizing consistent across platforms/browsers */
+    -webkit-text-size-adjust: 100%;
 }
 .container {
     width: 95%;
@@ -74,8 +76,24 @@ table {
     min-width: 100%;
 }
 
-th, td {
-    padding: 6px 4px;
+/* Header cells */
+th {
+    padding: 4px 4px;
+    line-height: 1.15;
+    text-align: right;
+    border-bottom: 1px solid #ddd;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    box-sizing: border-box;
+}
+
+/* Stock rows: ~30% shorter */
+td {
+    /* Force a tighter, consistent row height across desktop/mobile */
+    padding: 2px 4px;
+    line-height: 1.0;
+    height: 18px;
     text-align: right;
     border-bottom: 1px solid #ddd;
     white-space: nowrap;
@@ -242,12 +260,18 @@ tr:nth-child(even) { background-color: #f9f9f9; }
     /* Whole header becomes 2x2 grid */
     .header {
         display: grid !important;
-        grid-template-columns: 1fr auto;
+        /* Give the right column a real, shrinkable width so it won't get pushed off-screen */
+        grid-template-columns: 1fr minmax(0, 46vw);
         grid-template-rows: auto auto;
         align-items: center;
+        padding-right: 2px; /* tighter on the right so time+dot sit further right */
         column-gap: 10px;
         row-gap: 0px; /* no extra gap between 恒指/國指 */
     }
+
+    /* Slightly smaller text on iPhone so time + dot can fit */
+    .index { font-size: 13px; }
+    .timestamp { font-size: 13px; }
 
     /* Left column fixed rows */
     #hsi-wrapper   { grid-column: 1; grid-row: 1; text-align: left; }
@@ -259,11 +283,13 @@ tr:nth-child(even) { background-color: #f9f9f9; }
         grid-row: 1 / 3;
 
         display: grid !important;
-        grid-template-columns: auto auto auto auto 14px; /* WL | 123 | ON | time | dot */
+        grid-template-columns: min-content 1fr 12px; /* ON or HSI | flexible space (time/buttons) | dot */
         grid-template-rows: auto auto;         /* time row | buttons row */
         align-items: center;
         justify-content: end;
-        column-gap: 8px;
+        padding-right: 0px; /* push timestamp content closer to right edge */
+        margin-right: -6px; /* nudge whole block slightly right */
+        column-gap: 6px;
         row-gap: 6px;
 
         /* override old flex */
@@ -273,23 +299,37 @@ tr:nth-child(even) { background-color: #f9f9f9; }
     }
 
     /* Time MUST be only on row 1 */
+    /* Make top-right controls a bit more compact */
+    .btn, button {
+        font-size: 12px;
+        padding: 6px 12px;
+        border-radius: 18px;
+        min-height: 32px;
+    }
     /* Row 1: keep ON close to the time (top-right) */
     #sourceToggleButton {
-        grid-column: 3;
+        grid-column: 1;
         grid-row: 1;
         justify-self: end;
+        margin-right: 0px;
+        max-width: 60px;
     }
 
     #current_time {
-        grid-column: 4 / 6; /* span to the end so time has enough width */
+        grid-column: 2 / 4;
         grid-row: 1;
         justify-self: end;
         text-align: right;
+        padding-left: 0px;
+        padding-right: 0px;
         white-space: nowrap;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     /* Buttons + dot MUST be only on row 2 */
-    #toggleListButton { grid-column: 3; grid-row: 2; justify-self: end; }
-    #sortModeButton   { grid-column: 4; grid-row: 2; justify-self: end; }
-    #sourceHealth     { grid-column: 5; grid-row: 2; justify-self: end; }
+    #toggleListButton { grid-column: 1; grid-row: 2; justify-self: end; }
+    #sortModeButton   { grid-column: 2; grid-row: 2; justify-self: end; }
+    #sourceHealth     { grid-column: 3; grid-row: 2; justify-self: end; }
 }

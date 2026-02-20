@@ -4,7 +4,7 @@
 // - Runtime cache is limited to images/fonts only (no HTML/CSS/JS runtime caching),
 //   to avoid "old JS served" issues after upgrades.
 
-const CACHE_NAME = 'hk-stock-store-v22';
+const CACHE_NAME = 'hk-stock-store-v24';
 const ASSET_CACHE_NAME = 'hk-stock-assets-v1';
 const PRECACHE_URLS = [
   './',
@@ -13,7 +13,7 @@ const PRECACHE_URLS = [
   './icon-192.png',
   './icon-512.png',
   './styles.css',
-  './main.js?v=23',
+  './main.js',
   './hsi_constituents.json'
 ];
 
