@@ -1,0 +1,335 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 10px;
+    background-color: #f5f5f5;
+    padding-bottom: 20px;
+    /* Keep text sizing consistent across platforms/browsers */
+    -webkit-text-size-adjust: 100%;
+}
+.container {
+    width: 95%;
+    max-width: 1600px;
+    margin: 0 auto;
+    background-color: white;
+    padding: 10px;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    overflow-x: auto;
+}
+
+/* --- Table Styling --- */
+.header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    font-weight: bold;
+    /* Match the table text size */
+    font-size: 14px;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+}
+.index { font-weight: bold; font-size: 14px; }
+.timestamp { text-align: right; color: black; font-size: 14px; display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+
+/* Data source health indicator (top-right dot) */
+.health-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    display: inline-block;
+    border: 1px solid rgba(0,0,0,0.2);
+}
+.health-loading { background: #bbb; }
+.health-good { background: #19a64a; }
+.health-warn { background: #f0ad4e; }
+.health-bad { background: #d9534f; }
+
+/* Header toggle button: Watchlist <-> 恒生指數成份股 */
+.btn-toggle { background: #ffffff; border: 1px solid #ccc; color: #007bff; font-weight: 700; padding: 4px 10px; border-radius: 999px; font-size: 12px; line-height: 1; cursor: pointer; }
+.btn-toggle:hover { border-color: #007bff; }
+.btn-toggle:active { transform: translateY(1px); }
+.btn-toggle.active { background: #007bff; color: #ffffff; border-color: #007bff; }
+.btn-toggle:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Top-right sort mode button */
+.btn-sortmode { margin-left: 6px; min-width: 44px; text-align: center; }
+
+/* Top-right data source button (left of time) */
+.btn-source { min-width: 44px; text-align: center; }
+
+/* Footer info line under the table */
+.footer-info {
+    font-size: 14px;
+}
+
+/* Always add exactly one blank space in front of 恒指 / 國指 */
+#hsi-wrapper::before,
+#hscei-wrapper::before {
+    content: "\00a0";
+}
+
+table {
+    border-collapse: collapse;
+    font-size: 14px;
+    table-layout: fixed;
+    width: 100%;
+    min-width: 100%;
+}
+
+/* Header cells */
+th {
+    padding: 4px 4px;
+    line-height: 1.15;
+    text-align: right;
+    border-bottom: 1px solid #ddd;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    box-sizing: border-box;
+}
+
+/* Stock rows: ~30% shorter */
+td {
+    /* Force a tighter, consistent row height across desktop/mobile */
+    padding: 2px 4px;
+    line-height: 1.0;
+    height: 18px;
+    text-align: right;
+    border-bottom: 1px solid #ddd;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    box-sizing: border-box;
+}
+
+th:nth-last-child(2), td:nth-last-child(2) { text-align: center; }
+
+th {
+    background-color: #e0e0e0;
+    font-weight: bold;
+    position: relative;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+tr:nth-child(even) { background-color: #f9f9f9; }
+
+/* --- Arrows --- */
+.arrow-up { font-weight: bold; }
+.arrow-down { font-weight: bold; }
+.arrow-none { color: #ccc; }
+.trend-indicator {
+    font-weight: bold;
+    margin-right: 4px;
+}
+
+/* --- Row Highlight --- */
+.highlight { background-color: #ffff99 !important; }
+
+/* --- Logic-Based Text Colors --- */
+.style-flat, .style-flat a { color: black !important; }
+.style-rise-small, .style-rise-small a { color: #4169E1 !important; }
+.style-rise-big, .style-rise-big a { color: #0000ff !important; }
+.style-fall-small, .style-fall-small a { color: #FF4500 !important; }
+.style-fall-big, .style-fall-big a { color: red !important; }
+
+/* --- NEW: Tick Background Colors (Very Light) --- */
+.bg-tick-up { background-color: #e6f7ff !important; }   /* Very Light Blue */
+.bg-tick-down { background-color: #fff1f0 !important; } /* Very Light Red */
+
+/* --- Link Styling --- */
+.stock-link {
+    text-decoration: none;
+    cursor: pointer;
+    display: block;
+    font-weight: normal;
+}
+.stock-link:hover {
+    text-decoration: underline;
+}
+
+.stock-no { text-align: right; font-weight: normal; }
+.stock-name { text-align: right; font-weight: normal; }
+.rt-quote { text-align: right; font-weight: bold; }
+
+.resizer {
+    display: inline-block;
+    width: 10px;
+    height: 100%;
+    position: absolute;
+    right: 0;
+    top: 0;
+    cursor: col-resize;
+    z-index: 10;
+}
+.resizer:hover { background: rgba(0, 0, 0, 0.1); }
+.resizer.isResizing { background: rgba(0, 0, 255, 0.3); }
+
+/* Toast (mode switch hint) */
+.toast {
+    position: fixed;
+    left: 50%;
+    bottom: 18px;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.85);
+    color: #fff;
+    padding: 10px 14px;
+    border-radius: 999px;
+    font-size: 13px;
+    line-height: 1.2;
+    max-width: calc(100% - 24px);
+    text-align: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 160ms ease;
+    z-index: 9999;
+}
+.toast.show { opacity: 1; }
+
+/* --- Control Panel --- */
+.controls {
+    display: flex;
+    gap: 15px;
+    margin-top: 20px;
+    padding: 15px;
+    background-color: #f0f7ff;
+    border-radius: 5px;
+    align-items: center;
+    border-top: 1px solid #ddd;
+    flex-wrap: wrap;
+}
+.control-group { display: flex; align-items: center; gap: 5px; }
+.controls input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+.input-code { width: 120px; }
+.input-interval { width: 60px; }
+.input-message {
+    font-size: 12px;
+    color: #8a1f11;
+    min-width: 120px;
+}
+.input-message.success { color: #1f6f2a; }
+
+.btn { padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; color: white; }
+.btn-add { background-color: #28a745; }
+.btn-add:hover { background-color: #218838; }
+.btn-set { background-color: #007bff; }
+.btn-set:hover { background-color: #0056b3; }
+.btn-sort { background-color: #17a2b8; }
+.btn-sort:hover { background-color: #117a8b; }
+.btn-reset { background-color: #6c757d; margin-left: auto; font-size: 0.9em; }
+.btn-delete { background-color: #dc3545; color: white; border: none; border-radius: 3px; width: 24px; height: 24px; cursor: pointer; line-height: 24px; text-align: center; padding: 0; font-size: 14px; }
+.btn-delete:hover { background-color: #c82333; }
+.divider { width: 1px; height: 30px; background-color: #ccc; margin: 0 10px; }
+
+.row-error {
+    background-color: #fff6f6 !important;
+    color: #a30000;
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* Mobile tweaks */
+@media (max-width: 700px) {
+    .header { justify-content: space-between; align-items: center; }
+    #hsi-wrapper { order: 1; flex: 1 1 auto; text-align: left; white-space: nowrap; }
+    .timestamp { order: 2; flex: 0 0 auto; margin-left: auto; text-align: right; white-space: nowrap; }
+    #hscei-wrapper { order: 3; flex: 1 1 100%; text-align: left; white-space: nowrap; }
+
+    /* Easier to grab on mobile */
+    .resizer { width: 16px; }
+
+    .controls { gap: 10px; }
+}
+
+/* iPhone: EXACT 2-row layout you requested
+   Row 1: left 恒指 | right 時間
+   Row 2: left 國指 | right 按鈕+綠燈
+*/
+@media (max-width: 520px) {
+
+    /* Whole header becomes 2x2 grid */
+    .header {
+        display: grid !important;
+        /* Give the right column a real, shrinkable width so it won't get pushed off-screen */
+        grid-template-columns: 1fr minmax(0, 46vw);
+        grid-template-rows: auto auto;
+        align-items: center;
+        padding-right: 2px; /* tighter on the right so time+dot sit further right */
+        column-gap: 10px;
+        row-gap: 0px; /* no extra gap between 恒指/國指 */
+    }
+
+    /* Slightly smaller text on iPhone so time + dot can fit */
+    .index { font-size: 13px; }
+    .timestamp { font-size: 13px; }
+
+    /* Left column fixed rows */
+    #hsi-wrapper   { grid-column: 1; grid-row: 1; text-align: left; }
+    #hscei-wrapper { grid-column: 1; grid-row: 2; text-align: left; }
+
+    /* Right column: timestamp spans 2 rows, but internally split into 2 rows */
+    .timestamp {
+        grid-column: 2;
+        grid-row: 1 / 3;
+
+        display: grid !important;
+        grid-template-columns: min-content 1fr 12px; /* ON or HSI | flexible space (time/buttons) | dot */
+        grid-template-rows: auto auto;         /* time row | buttons row */
+        align-items: center;
+        justify-content: end;
+        padding-right: 0px; /* push timestamp content closer to right edge */
+        margin-right: -6px; /* nudge whole block slightly right */
+        column-gap: 6px;
+        row-gap: 6px;
+
+        /* override old flex */
+        white-space: normal !important;
+        margin-left: 0 !important;
+        text-align: right;
+    }
+
+    /* Time MUST be only on row 1 */
+    /* Make top-right controls a bit more compact */
+    .btn, button {
+        font-size: 12px;
+        padding: 6px 12px;
+        border-radius: 18px;
+        min-height: 32px;
+    }
+    /* Row 1: keep ON close to the time (top-right) */
+    #sourceToggleButton {
+        grid-column: 1;
+        grid-row: 1;
+        justify-self: end;
+        margin-right: 0px;
+        max-width: 60px;
+    }
+
+    #current_time {
+        grid-column: 2 / 4;
+        grid-row: 1;
+        justify-self: end;
+        text-align: right;
+        padding-left: 0px;
+        padding-right: 0px;
+        white-space: nowrap;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* Buttons + dot MUST be only on row 2 */
+    #toggleListButton { grid-column: 1; grid-row: 2; justify-self: end; }
+    #sortModeButton   { grid-column: 2; grid-row: 2; justify-self: end; }
+    #sourceHealth     { grid-column: 3; grid-row: 2; justify-self: end; }
+}

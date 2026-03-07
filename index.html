@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hong Kong Stock Watchlist (Index Trend)</title>
+
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#007bff">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div id="hsi-wrapper" class="index">&nbsp;恒指: <span id="hsi_value">-</span> <span id="hsi_change">-</span> <span id="hsi_arrow"></span></div>
+            <div id="hscei-wrapper" class="index">&nbsp;國指: <span id="china_index_value">-</span> <span id="china_index_change">-</span> <span id="china_index_arrow"></span></div>
+            <div class="timestamp" aria-live="polite">
+    <button id="toggleListButton" class="btn-toggle" type="button" aria-label="Switch list to Hang Seng Index constituents">HSI</button>
+    <button id="sortModeButton" class="btn-toggle btn-sortmode" type="button" aria-label="Change sorting mode">123</button>
+    <span id="sourceHealth" class="health-dot health-loading" aria-label="Data source health" title="Data source health: checking..."></span>
+    <button id="sourceToggleButton" class="btn-toggle btn-source" type="button" aria-label="Switch data source">ON</button>
+    <span id="current_time">Loading...</span>
+</div>
+        </div>
+
+        <table id="stockTable">
+            <thead>
+                <tr id="headerRow">
+                    <th style="width: 60px">No<div class="resizer"></div></th>
+                    <th style="width: 120px">Name<div class="resizer"></div></th>
+                    <th style="width: 90px">Price<div class="resizer"></div></th>
+                    <th style="width: 70px">Change<div class="resizer"></div></th>
+                    <th style="width: 70px">%<div class="resizer"></div></th>
+                    <th style="width: 70px">PreCls<div class="resizer"></div></th>
+                    <th style="width: 70px">Open<div class="resizer"></div></th>
+                    <th style="width: 70px">High<div class="resizer"></div></th>
+                    <th style="width: 70px">Low<div class="resizer"></div></th>
+                    <th style="width: 90px">Turnover<div class="resizer"></div></th>
+                    <th style="width: 50px">Action<div class="resizer"></div></th>
+                    <th style="width: 50px"><div class="resizer"></div></th>
+                </tr>
+            </thead>
+            <tbody id="stockData">
+                <tr><td colspan="12">Loading data...</td></tr>
+            </tbody>
+        </table>
+
+        <div class="footer-info" style="margin-top: 10px; text-align: center; color: #666; font-style: italic;">
+            <span id="bottomTime"></span>
+            Next: <span id="nextRefresh">Calculating...</span> |
+            Status: <span id="status" aria-live="polite">Checking...</span>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <label for="newStockInput"><strong>Add Stock:</strong></label>
+                <input type="number" id="newStockInput" class="input-code" placeholder="Code (e.g. 700)">
+                <button id="addStockButton" class="btn btn-add">Add</button>
+                <span id="addStockMessage" class="input-message" role="status" aria-live="polite"></span>
+            </div>
+            <div class="divider"></div>
+            <div class="control-group">
+                <label for="refreshInput"><strong>Refresh (sec):</strong></label>
+                <input type="number" id="refreshInput" class="input-interval" value="30" min="3">
+                <button id="setRefreshButton" class="btn btn-set">Set</button>
+                <span id="refreshMessage" class="input-message" role="status" aria-live="polite"></span>
+            </div>
+            <button id="sortButton" class="btn btn-sort">Sort: Asc</button>
+            <button id="resetButton" class="btn btn-reset">Reset Default List</button>
+        </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+
+    <script>
+        // Check if running from file:// protocol
+        if (window.location.protocol === 'file:') {
+            document.body.innerHTML = `
+                <div style="padding: 20px; text-align: center; font-family: Arial, sans-serif;">
+                    <h2 style="color: #d9534f;">⚠️ 需要用伺服器開啟</h2>
+                    <p>此應用使用 ES6 模組，不能直接用瀏覽器開啟 HTML 檔案。</p>
+                    <p style="margin-top: 20px;"><strong>請使用以下方法之一：</strong></p>
+                    <div style="text-align: left; display: inline-block; margin-top: 10px; background: #f5f5f5; padding: 15px; border-radius: 5px;">
+                        <p><strong>方法 1 - Python：</strong></p>
+                        <code style="background: #333; color: #fff; padding: 5px 10px; border-radius: 3px;">python -m http.server 8080</code>
+                        <p style="margin-top: 10px;">然後打開 <code>http://localhost:8080</code></p>
+                        <br>
+                        <p><strong>方法 2 - Node.js：</strong></p>
+                        <code style="background: #333; color: #fff; padding: 5px 10px; border-radius: 3px;">npx serve .</code>
+                        <br><br>
+                        <p><strong>方法 3 - VS Code：</strong></p>
+                        <p>安裝 "Live Server" 擴充功能，然後點擊右下角的 "Go Live"</p>
+                    </div>
+                </div>
+            `;
+        }
+    </script>
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>
